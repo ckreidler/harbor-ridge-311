@@ -235,10 +235,12 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
   expect(agent).not.toContain('AIPrompt');
   expect(JSON.stringify(template.findResources('Custom::AWS'))).toContain('AIAgentVersionId');
   expect(joinReferencesVersionNumber(template.toJSON())).toBe(false);
+  expect(JSON.stringify(template.findResources('AWS::Wisdom::AIGuardrailVersion'))).toContain('ModifiedTimeSeconds');
+  expect(JSON.stringify(template.findResources('AWS::Wisdom::AIAgentVersion'))).toContain('ModifiedTimeSeconds');
 
   const guardrail = JSON.stringify(template.findResources('AWS::Wisdom::AIGuardrail'));
-  expect(guardrail).toContain('Off topic');
-  expect(guardrail).toContain('DENY');
+  expect(guardrail).not.toContain('TopicPolicyConfig');
+  expect(guardrail).not.toContain('Off topic');
   expect(guardrail).toContain('I can only help with Harbor Ridge city services');
   expect(guardrail).toContain('I cannot share that');
   for (const pii of ['ADDRESS', 'EMAIL', 'PHONE', 'NAME', 'US_SOCIAL_SECURITY_NUMBER', 'CREDIT_DEBIT_CARD_NUMBER']) {

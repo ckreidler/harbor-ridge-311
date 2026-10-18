@@ -222,23 +222,9 @@ export class ConnectStack extends cdk.Stack {
     const guardrail = new wisdom.CfnAIGuardrail(this, 'SelfServiceGuardrail', {
       assistantId,
       name: 'HarborRidge311-Guardrail',
-      description: 'Blocks off-topic requests and personal information.',
+      description: 'Blocks personal information.',
       blockedInputMessaging: BLOCKED_INPUT_MESSAGE,
       blockedOutputsMessaging: BLOCKED_OUTPUT_MESSAGE,
-      topicPolicyConfig: {
-        topicsConfig: [
-          {
-            name: 'Off topic',
-            type: 'DENY',
-            definition: 'Requests unrelated to Harbor Ridge city services such as trash, roads, parking, or office hours.',
-            examples: [
-              'What is the weather today?',
-              'Tell me a joke',
-              'Who won the game last night?',
-            ],
-          },
-        ],
-      },
       sensitiveInformationPolicyConfig: {
         piiEntitiesConfig: BLOCKED_PII.map((type) => ({ type, action: 'BLOCK' })),
         regexesConfig: [
@@ -254,6 +240,7 @@ export class ConnectStack extends cdk.Stack {
     const guardrailVersion = new wisdom.CfnAIGuardrailVersion(this, 'SelfServiceGuardrailVersion', {
       assistantId,
       aiGuardrailId: guardrail.attrAiGuardrailId,
+      modifiedTimeSeconds: cdk.Token.asNumber(guardrail.attrModifiedTimeSeconds),
     });
     const selfServiceAgent = new wisdom.CfnAIAgent(this, 'SelfServiceAgent', {
       assistantId,
@@ -269,6 +256,7 @@ export class ConnectStack extends cdk.Stack {
     const selfServiceAgentVersion = new wisdom.CfnAIAgentVersion(this, 'SelfServiceAgentVersion', {
       assistantId,
       aiAgentId: selfServiceAgent.attrAiAgentId,
+      modifiedTimeSeconds: cdk.Token.asNumber(selfServiceAgent.attrModifiedTimeSeconds),
     });
 
     const setDefaultAgentCall: cr.AwsSdkCall = {
