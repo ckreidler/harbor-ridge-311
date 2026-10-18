@@ -269,7 +269,7 @@ export class ConnectStack extends cdk.Stack {
           aiAgentId: selfServiceAgentVersion.attrAiAgentVersionId,
         },
       },
-      physicalResourceId: cr.PhysicalResourceId.of(selfServiceAgentVersion.attrAiAgentVersionId),
+      physicalResourceId: cr.PhysicalResourceId.of('HarborRidge311-SelfServiceDefault'),
     };
     const setDefaultAgent = new cr.AwsCustomResource(this, 'SetDefaultSelfServiceAgent', {
       installLatestAwsSdk: true,
