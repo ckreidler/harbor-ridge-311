@@ -243,7 +243,8 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
   expect(guardrail).not.toContain('Off topic');
   expect(guardrail).toContain('I can only help with Harbor Ridge city services');
   expect(guardrail).toContain('I cannot share that');
-  for (const pii of ['ADDRESS', 'EMAIL', 'PHONE', 'NAME', 'US_SOCIAL_SECURITY_NUMBER', 'CREDIT_DEBIT_CARD_NUMBER']) {
+  expect(guardrail).not.toContain('ADDRESS');
+  for (const pii of ['EMAIL', 'PHONE', 'NAME', 'US_SOCIAL_SECURITY_NUMBER', 'CREDIT_DEBIT_CARD_NUMBER']) {
     expect(guardrail).toContain(pii);
   }
   expect(guardrail).toContain('BLOCK');

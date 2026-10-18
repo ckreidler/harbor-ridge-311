@@ -20,7 +20,6 @@ const BLOCKED_INPUT_MESSAGE = 'I can only help with Harbor Ridge city services, 
 const BLOCKED_OUTPUT_MESSAGE = 'I cannot share that. Please ask about Harbor Ridge city services without personal details.';
 
 const BLOCKED_PII = [
-  'ADDRESS',
   'EMAIL',
   'PHONE',
   'NAME',
@@ -228,7 +227,7 @@ export class ConnectStack extends cdk.Stack {
       sensitiveInformationPolicyConfig: {
         piiEntitiesConfig: BLOCKED_PII.map((type) => ({
           type,
-          action: type === 'ADDRESS' || type === 'NAME' ? 'ANONYMIZE' : 'BLOCK',
+          action: type === 'NAME' ? 'ANONYMIZE' : 'BLOCK',
         })),
         regexesConfig: [
           {
