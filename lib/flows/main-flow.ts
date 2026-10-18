@@ -117,6 +117,7 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
           ContactFlowId: props.afterHoursFlowArn,
         },
         Transitions: {
+          NextAction: 'disconnect',
           Errors: errorTo('disconnect'),
           Conditions: [],
         },
