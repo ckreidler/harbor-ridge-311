@@ -38,6 +38,8 @@ export interface MainFlowProps {
   dataTableId: string;
   wisdomAssistantArn: string;
   lexBotAliasArn: string;
+  hoursOfOperationArn: string;
+  afterHoursFlowArn: string;
 }
 
 const ENGLISH_GREETING = 'Thank you for calling Harbor Ridge 3 1 1. This line is a demo.';
@@ -57,6 +59,8 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
       entryPointPosition: { x: 40, y: 40 },
       ActionMetadata: {
         'enable-flow-logging': { position: { x: 290, y: 160 } },
+        'check-hours': { position: { x: 415, y: 160 } },
+        'transfer-after-hours': { position: { x: 415, y: 400 } },
         'select-language': { position: { x: 540, y: 160 } },
         'set-en-language': { position: { x: 790, y: 40 } },
         'set-en-voice': { position: { x: 1040, y: 40 } },
@@ -82,7 +86,40 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
           FlowLoggingBehavior: 'Enabled',
         },
         Transitions: {
+          NextAction: 'check-hours',
+        },
+      },
+      {
+        Identifier: 'check-hours',
+        Type: 'CheckHoursOfOperation',
+        Parameters: {
+          HoursOfOperationId: props.hoursOfOperationArn,
+        },
+        Transitions: {
           NextAction: 'select-language',
+          Conditions: [
+            {
+              NextAction: 'select-language',
+              Condition: { Operator: 'Equals', Operands: ['True'] },
+            },
+            {
+              NextAction: 'transfer-after-hours',
+              Condition: { Operator: 'Equals', Operands: ['False'] },
+            },
+          ],
+          Errors: errorTo('transfer-after-hours'),
+        },
+      },
+      {
+        Identifier: 'transfer-after-hours',
+        Type: 'TransferToFlow',
+        Parameters: {
+          ContactFlowId: props.afterHoursFlowArn,
+        },
+        Transitions: {
+          NextAction: 'disconnect',
+          Errors: errorTo('disconnect'),
+          Conditions: [],
         },
       },
       {
