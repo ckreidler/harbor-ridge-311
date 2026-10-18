@@ -240,6 +240,9 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
           LexV2Bot: {
             AliasArn: props.lexBotAliasArn,
           },
+          LexSessionAttributes: {
+            'x-amz-lex:q-in-connect:session-arn': '$.Wisdom.SessionArn',
+          },
         },
         Transitions: {
           NextAction: 'check-tool',
@@ -258,6 +261,9 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
           Text: SPANISH_QUESTION,
           LexV2Bot: {
             AliasArn: props.lexBotAliasArn,
+          },
+          LexSessionAttributes: {
+            'x-amz-lex:q-in-connect:session-arn': '$.Wisdom.SessionArn',
           },
         },
         Transitions: {
