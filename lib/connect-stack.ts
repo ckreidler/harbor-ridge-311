@@ -16,20 +16,6 @@ import { mainFlow } from './flows/main-flow';
 const SANDBOX_PARAMETER_PREFIX = '/connect/sandbox';
 const FAQ_SOURCE_NAME = 'HarborRidge311-Faqs';
 
-const BLOCKED_INPUT_MESSAGE = 'I can only help with Harbor Ridge city services, and I cannot take personal information. Please ask about trash pickup, potholes, parking permits, or office hours.';
-const BLOCKED_OUTPUT_MESSAGE = 'I cannot share that. Please ask about Harbor Ridge city services without personal details.';
-
-const BLOCKED_PII = [
-  'ADDRESS',
-  'EMAIL',
-  'PHONE',
-  'NAME',
-  'PASSWORD',
-  'US_SOCIAL_SECURITY_NUMBER',
-  'CREDIT_DEBIT_CARD_NUMBER',
-  'US_BANK_ACCOUNT_NUMBER',
-];
-
 function cityQuestionLocale(localeId: string, voiceId: string, assistantArn: string): lex.CfnBot.BotLocaleProperty {
   return {
     localeId,
@@ -225,48 +211,13 @@ export class ConnectStack extends cdk.Stack {
       integrationArn: knowledgeBase.attrKnowledgeBaseArn,
     });
 
-    const guardrail = new wisdom.CfnAIGuardrail(this, 'SelfServiceGuardrail', {
-      assistantId,
-      name: 'HarborRidge311-Guardrail',
-      description: 'Blocks off-topic requests and personal information.',
-      blockedInputMessaging: BLOCKED_INPUT_MESSAGE,
-      blockedOutputsMessaging: BLOCKED_OUTPUT_MESSAGE,
-      topicPolicyConfig: {
-        topicsConfig: [
-          {
-            name: 'Off topic',
-            type: 'DENY',
-            definition: 'Requests unrelated to Harbor Ridge city services such as trash, roads, parking, or office hours.',
-            examples: [
-              'What is the weather today?',
-              'Tell me a joke',
-              'Who won the game last night?',
-            ],
-          },
-        ],
-      },
-      sensitiveInformationPolicyConfig: {
-        piiEntitiesConfig: BLOCKED_PII.map((type) => ({ type, action: 'BLOCK' })),
-      },
-    });
-    const guardrailVersion = new wisdom.CfnAIGuardrailVersion(this, 'SelfServiceGuardrailVersion', {
-      assistantId,
-      aiGuardrailId: guardrail.attrAiGuardrailId,
-    });
-    const guardrailVersionId = cdk.Fn.join(':', [
-      guardrail.attrAiGuardrailId,
-      cdk.Token.asString(guardrailVersion.attrVersionNumber),
-    ]);
-
     const selfServiceAgent = new wisdom.CfnAIAgent(this, 'SelfServiceAgent', {
       assistantId,
       name: 'HarborRidge311-SelfService',
       type: 'SELF_SERVICE',
       description: 'Answers Harbor Ridge city questions from the FAQ knowledge base.',
       configuration: {
-        selfServiceAiAgentConfiguration: {
-          selfServiceAiGuardrailId: guardrailVersionId,
-        },
+        selfServiceAiAgentConfiguration: {},
       },
     });
     const selfServiceAgentVersion = new wisdom.CfnAIAgentVersion(this, 'SelfServiceAgentVersion', {

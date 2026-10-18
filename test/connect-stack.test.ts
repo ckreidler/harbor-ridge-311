@@ -172,8 +172,8 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
   template.resourceCountIs('AWS::Wisdom::Assistant', 0);
   template.resourceCountIs('AWS::Wisdom::KnowledgeBase', 1);
   template.resourceCountIs('AWS::Wisdom::AssistantAssociation', 1);
-  template.resourceCountIs('AWS::Wisdom::AIGuardrail', 1);
-  template.resourceCountIs('AWS::Wisdom::AIGuardrailVersion', 1);
+  template.resourceCountIs('AWS::Wisdom::AIGuardrail', 0);
+  template.resourceCountIs('AWS::Wisdom::AIGuardrailVersion', 0);
   template.resourceCountIs('AWS::Wisdom::AIAgent', 1);
   template.resourceCountIs('AWS::Wisdom::AIAgentVersion', 1);
   template.resourceCountIs('AWS::Wisdom::AIPrompt', 0);
@@ -216,18 +216,9 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
     Type: 'SELF_SERVICE',
   });
   const agent = JSON.stringify(template.findResources('AWS::Wisdom::AIAgent'));
-  expect(agent).toContain('SelfServiceAIGuardrailId');
+  expect(agent).toContain('SelfServiceAIAgentConfiguration');
+  expect(agent).not.toContain('SelfServiceAIGuardrailId');
   expect(agent).not.toContain('AIPrompt');
-
-  const guardrail = JSON.stringify(template.findResources('AWS::Wisdom::AIGuardrail'));
-  expect(guardrail).toContain('Off topic');
-  expect(guardrail).toContain('DENY');
-  expect(guardrail).toContain('I can only help with Harbor Ridge city services');
-  expect(guardrail).toContain('I cannot share that');
-  for (const pii of ['ADDRESS', 'EMAIL', 'PHONE', 'NAME', 'US_SOCIAL_SECURITY_NUMBER', 'CREDIT_DEBIT_CARD_NUMBER']) {
-    expect(guardrail).toContain(pii);
-  }
-  expect(guardrail).toContain('BLOCK');
 
   const integrations = template.findResources('AWS::Connect::IntegrationAssociation');
   const integrationTypes = Object.values(integrations).map((resource) => (
