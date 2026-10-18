@@ -6,7 +6,9 @@ The `cdk.json` file tells the CDK Toolkit how to execute your app.
 
 ## ConnectStack
 
-`ConnectStack` reads the sandbox instance published by [connect-platform](https://github.com/ckreidler/connect-platform) and adds a contact flow named `HarborRidge311-Main` plus a data table named `HarborRidge311-Prompts`. The flow asks the caller to press 1 for English or 2 for Spanish, sets the voice and contact language, then plays the greeting and goodbye for that language from the table. A lookup error plays a hardcoded English fallback and hangs up. A custom resource calls `AssociatePhoneNumberContactFlow` so the sandbox number uses this flow, and `DisassociatePhoneNumberContactFlow` when the stack is deleted.
+`ConnectStack` reads the sandbox instance published by [connect-platform](https://github.com/ckreidler/connect-platform) and adds a contact flow named `HarborRidge311-Main` plus a data table named `HarborRidge311-Prompts`. The flow asks the caller to press 1 for English or 2 for Spanish, sets the voice and contact language, then plays the greeting for that language from the table. The caller can then ask about trash pickup, potholes, parking permits, or office hours. Answers come from Amazon Q in Connect, using FAQ documents in a private S3 bucket. The Lex bot has English (US) and Spanish (US) locales. Answer text uses the default English system prompts, so a Spanish caller is recognized but the generated answer is not localized. Saying agent, or any path that does not finish the question, plays the goodbye from the table and hangs up. There is no human queue. A lookup error plays a hardcoded English fallback and hangs up. A custom resource calls `AssociatePhoneNumberContactFlow` so the sandbox number uses this flow, and `DisassociatePhoneNumberContactFlow` when the stack is deleted.
+
+The assistant, its knowledge base, and the Lex bot are associated with the shared sandbox instance. An assistant association is one per Connect instance and would normally live in connect-platform. It is in this stack so the demo deploys from one app.
 
 SSM parameters, read at deploy time with `StringParameter.valueForStringParameter`:
 
@@ -23,7 +25,7 @@ Deploy `ConnectStack` with credentials for account `945777367807`. The region is
 npx cdk deploy ConnectStack
 ```
 
-Outputs are the contact flow ARN and the phone number.
+Outputs are the contact flow ARN, the phone number, the assistant ARN, and the Lex bot alias ARN.
 
 ## Useful commands
 

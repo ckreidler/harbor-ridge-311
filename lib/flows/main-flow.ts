@@ -36,6 +36,8 @@ interface ContactFlowContent {
 
 export interface MainFlowProps {
   dataTableId: string;
+  wisdomAssistantArn: string;
+  lexBotAliasArn: string;
 }
 
 const ENGLISH_GREETING = 'Thank you for calling Harbor Ridge 3 1 1. This line is a demo.';
@@ -59,8 +61,11 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
         'set-es-voice': { position: { x: 790, y: 280 } },
         'lookup-prompts': { position: { x: 1040, y: 160 } },
         'play-greeting': { position: { x: 1290, y: 160 } },
-        'play-goodbye': { position: { x: 1540, y: 160 } },
-        disconnect: { position: { x: 1790, y: 160 } },
+        'create-assistant-session': { position: { x: 1540, y: 160 } },
+        'ask-city-question': { position: { x: 1790, y: 160 } },
+        'check-tool': { position: { x: 2040, y: 160 } },
+        'play-goodbye': { position: { x: 2290, y: 160 } },
+        disconnect: { position: { x: 2540, y: 160 } },
         'play-fallback': { position: { x: 1290, y: 400 } },
       },
     },
@@ -152,7 +157,7 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
           Queries: [
             {
               QueryName: 'Prompts',
-              Attributes: ['Greeting', 'Goodbye'],
+              Attributes: ['Greeting', 'Goodbye', 'Question'],
               PrimaryValues: [
                 { AttributeName: 'Language', Value: '$.LanguageCode' },
               ],
@@ -172,9 +177,59 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
           Text: '$.DataTables.Prompts.Greeting',
         },
         Transitions: {
-          NextAction: 'play-goodbye',
+          NextAction: 'create-assistant-session',
           Errors: errorTo('play-fallback'),
           Conditions: [],
+        },
+      },
+      {
+        Identifier: 'create-assistant-session',
+        Type: 'CreateWisdomSession',
+        Parameters: {
+          WisdomAssistantArn: props.wisdomAssistantArn,
+        },
+        Transitions: {
+          NextAction: 'ask-city-question',
+          Errors: errorTo('play-goodbye'),
+          Conditions: [],
+        },
+      },
+      {
+        Identifier: 'ask-city-question',
+        Type: 'ConnectParticipantWithLexBot',
+        Parameters: {
+          Text: '$.DataTables.Prompts.Question',
+          LexV2Bot: {
+            AliasArn: props.lexBotAliasArn,
+          },
+        },
+        Transitions: {
+          NextAction: 'check-tool',
+          Errors: [
+            { ErrorType: 'InputTimeLimitExceeded', NextAction: 'play-goodbye' },
+            { ErrorType: 'NoMatchingCondition', NextAction: 'play-goodbye' },
+            { ErrorType: 'NoMatchingError', NextAction: 'play-goodbye' },
+          ],
+          Conditions: [],
+        },
+      },
+      {
+        Identifier: 'check-tool',
+        Type: 'Compare',
+        Parameters: {
+          ComparisonValue: '$.Lex.SessionAttributes.Tool',
+        },
+        Transitions: {
+          NextAction: 'play-goodbye',
+          Conditions: [
+            {
+              NextAction: 'play-goodbye',
+              Condition: { Operator: 'Equals', Operands: ['COMPLETE'] },
+            },
+          ],
+          Errors: [
+            { ErrorType: 'NoMatchingCondition', NextAction: 'play-goodbye' },
+          ],
         },
       },
       {
