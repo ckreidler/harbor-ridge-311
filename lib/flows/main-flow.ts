@@ -53,17 +53,15 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
       entryPointPosition: { x: 40, y: 40 },
       ActionMetadata: {
         'select-language': { position: { x: 290, y: 160 } },
-        'set-en-attribute': { position: { x: 540, y: 40 } },
-        'set-en-language': { position: { x: 790, y: 40 } },
-        'set-en-voice': { position: { x: 1040, y: 40 } },
-        'set-es-attribute': { position: { x: 540, y: 280 } },
-        'set-es-language': { position: { x: 790, y: 280 } },
-        'set-es-voice': { position: { x: 1040, y: 280 } },
-        'lookup-prompts': { position: { x: 1290, y: 160 } },
-        'play-greeting': { position: { x: 1540, y: 160 } },
-        'play-goodbye': { position: { x: 1790, y: 160 } },
-        disconnect: { position: { x: 2040, y: 160 } },
-        'play-fallback': { position: { x: 1540, y: 400 } },
+        'set-en-language': { position: { x: 540, y: 40 } },
+        'set-en-voice': { position: { x: 790, y: 40 } },
+        'set-es-language': { position: { x: 540, y: 280 } },
+        'set-es-voice': { position: { x: 790, y: 280 } },
+        'lookup-prompts': { position: { x: 1040, y: 160 } },
+        'play-greeting': { position: { x: 1290, y: 160 } },
+        'play-goodbye': { position: { x: 1540, y: 160 } },
+        disconnect: { position: { x: 1790, y: 160 } },
+        'play-fallback': { position: { x: 1290, y: 400 } },
       },
     },
     Actions: [
@@ -76,35 +74,22 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
           InputTimeLimitSeconds: '5',
         },
         Transitions: {
-          NextAction: 'set-en-attribute',
+          NextAction: 'set-en-language',
           Conditions: [
             {
-              NextAction: 'set-en-attribute',
+              NextAction: 'set-en-language',
               Condition: { Operator: 'Equals', Operands: ['1'] },
             },
             {
-              NextAction: 'set-es-attribute',
+              NextAction: 'set-es-language',
               Condition: { Operator: 'Equals', Operands: ['2'] },
             },
           ],
           Errors: [
-            { ErrorType: 'InputTimeLimitExceeded', NextAction: 'set-en-attribute' },
-            { ErrorType: 'NoMatchingCondition', NextAction: 'set-en-attribute' },
-            { ErrorType: 'NoMatchingError', NextAction: 'set-en-attribute' },
+            { ErrorType: 'InputTimeLimitExceeded', NextAction: 'set-en-language' },
+            { ErrorType: 'NoMatchingCondition', NextAction: 'set-en-language' },
+            { ErrorType: 'NoMatchingError', NextAction: 'set-en-language' },
           ],
-        },
-      },
-      {
-        Identifier: 'set-en-attribute',
-        Type: 'UpdateContactAttributes',
-        Parameters: {
-          Attributes: { language: 'en-US' },
-          TargetContact: 'Current',
-        },
-        Transitions: {
-          NextAction: 'set-en-language',
-          Errors: errorTo('set-en-language'),
-          Conditions: [],
         },
       },
       {
@@ -130,19 +115,6 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
         Transitions: {
           NextAction: 'lookup-prompts',
           Errors: errorTo('lookup-prompts'),
-          Conditions: [],
-        },
-      },
-      {
-        Identifier: 'set-es-attribute',
-        Type: 'UpdateContactAttributes',
-        Parameters: {
-          Attributes: { language: 'es-US' },
-          TargetContact: 'Current',
-        },
-        Transitions: {
-          NextAction: 'set-es-language',
-          Errors: errorTo('set-es-language'),
           Conditions: [],
         },
       },
@@ -182,7 +154,7 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
               QueryName: 'Prompts',
               Attributes: ['Greeting', 'Goodbye'],
               PrimaryValues: [
-                { AttributeName: 'Language', Value: '$.Attributes.language' },
+                { AttributeName: 'Language', Value: '$.LanguageCode' },
               ],
             },
           ],

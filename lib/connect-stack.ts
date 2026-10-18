@@ -57,7 +57,7 @@ export class ConnectStack extends cdk.Stack {
       valueType: 'TEXT',
     });
 
-    for (const row of [
+    const promptRows = [
       {
         id: 'EnglishPrompt',
         language: 'en-US',
@@ -70,22 +70,20 @@ export class ConnectStack extends cdk.Stack {
         greeting: 'Gracias por llamar a Harbor Ridge tres uno uno. Esta línea es una demostración.',
         goodbye: 'Gracias por llamar a Harbor Ridge tres uno uno. Adiós.',
       },
-    ]) {
-      new connect.CfnDataTableRecord(this, row.id, {
-        instanceArn,
-        dataTableArn: prompts.attrArn,
-        dataTableRecord: {
-          primaryValues: [{
-            attributeId: languageAttribute.attrAttributeId,
-            attributeValue: row.language,
-          }],
-          values: [
-            { attributeId: greetingAttribute.attrAttributeId, attributeValue: row.greeting },
-            { attributeId: goodbyeAttribute.attrAttributeId, attributeValue: row.goodbye },
-          ],
-        },
-      });
-    }
+    ].map((row) => new connect.CfnDataTableRecord(this, row.id, {
+      instanceArn,
+      dataTableArn: prompts.attrArn,
+      dataTableRecord: {
+        primaryValues: [{
+          attributeId: languageAttribute.attrAttributeId,
+          attributeValue: row.language,
+        }],
+        values: [
+          { attributeId: greetingAttribute.attrAttributeId, attributeValue: row.greeting },
+          { attributeId: goodbyeAttribute.attrAttributeId, attributeValue: row.goodbye },
+        ],
+      },
+    }));
 
     const flow = new connect.CfnContactFlow(this, 'MainFlow', {
       instanceArn,
@@ -95,6 +93,7 @@ export class ConnectStack extends cdk.Stack {
         dataTableId: cdk.Fn.select(3, cdk.Fn.split('/', prompts.attrArn)),
       })),
     });
+    flow.node.addDependency(...promptRows);
 
     const associateCall: cr.AwsSdkCall = {
       service: 'connect',

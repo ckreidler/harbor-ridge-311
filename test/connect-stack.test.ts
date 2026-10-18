@@ -73,7 +73,10 @@ test('ConnectStack selects a language, looks up prompts, and associates the sand
   expect(records).toContain('Gracias por llamar a Harbor Ridge tres uno uno. Adiós.');
 
   const flows = template.findResources('AWS::Connect::ContactFlow');
-  const flow = Object.values(flows)[0] as { Properties: { Type: string; Content: unknown; Name: string } };
+  const flow = Object.values(flows)[0] as {
+    DependsOn?: string | string[];
+    Properties: { Type: string; Content: unknown; Name: string };
+  };
   expect(flow.Properties.Type).toBe('CONTACT_FLOW');
   expect(flow.Properties.Name).toBe('HarborRidge311-Main');
 
@@ -84,21 +87,23 @@ test('ConnectStack selects a language, looks up prompts, and associates the sand
   expect(menu?.Parameters?.InputTimeLimitSeconds).toBe('5');
   expect(digits).toEqual(['1', '2']);
   expect(menu?.Transitions?.Conditions?.find((branch) => branch.Condition.Operands[0] === '1')?.NextAction)
-    .toBe('set-en-attribute');
+    .toBe('set-en-language');
   expect(menu?.Transitions?.Conditions?.find((branch) => branch.Condition.Operands[0] === '2')?.NextAction)
-    .toBe('set-es-attribute');
+    .toBe('set-es-language');
   expect(menu?.Transitions?.Errors?.map((error) => error.NextAction)).toEqual([
-    'set-en-attribute',
-    'set-en-attribute',
-    'set-en-attribute',
+    'set-en-language',
+    'set-en-language',
+    'set-en-language',
   ]);
+  expect(content.Actions.some((action) => action.Type === 'UpdateContactAttributes')).toBe(false);
+  expect(JSON.stringify(content)).not.toContain('$.Attributes.language');
 
   expect(JSON.stringify(flow.Properties.Content)).toContain('Prompts');
   const lookup = content.Actions.find((action) => action.Type === 'EvaluateDataTableValues');
   expect(lookup?.Parameters?.Queries?.[0].QueryName).toBe('Prompts');
   expect(lookup?.Parameters?.Queries?.[0].Attributes).toEqual(['Greeting', 'Goodbye']);
   expect(lookup?.Parameters?.Queries?.[0].PrimaryValues).toEqual([
-    { AttributeName: 'Language', Value: '$.Attributes.language' },
+    { AttributeName: 'Language', Value: '$.LanguageCode' },
   ]);
   expect(lookup?.Transitions?.Errors?.[0].NextAction).toBe('play-fallback');
 
@@ -112,6 +117,9 @@ test('ConnectStack selects a language, looks up prompts, and associates the sand
     .toBe('Lupe');
   expect(content.Actions.map((action) => action.Identifier).every((id) => content.Metadata.ActionMetadata[id]?.position))
     .toBe(true);
+  const recordIds = Object.keys(template.findResources('AWS::Connect::DataTableRecord'));
+  const dependsOn = [flow.DependsOn].flat();
+  expect(dependsOn).toEqual(expect.arrayContaining(recordIds));
 
   const customResources = template.findResources('Custom::AWS');
   expect(Object.keys(customResources)).toHaveLength(1);
