@@ -1,8 +1,13 @@
 import * as path from 'node:path';
 import * as appintegrations from 'aws-cdk-lib/aws-appintegrations';
 import * as connect from 'aws-cdk-lib/aws-connect';
+import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import * as events from 'aws-cdk-lib/aws-events';
+import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as kms from 'aws-cdk-lib/aws-kms';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as nodejs from 'aws-cdk-lib/aws-lambda-nodejs';
 import * as lex from 'aws-cdk-lib/aws-lex';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as s3 from 'aws-cdk-lib/aws-s3';
@@ -12,9 +17,35 @@ import * as wisdom from 'aws-cdk-lib/aws-wisdom';
 import * as cdk from 'aws-cdk-lib/core';
 import * as cr from 'aws-cdk-lib/custom-resources';
 import { Construct } from 'constructs';
+import { afterHoursFlow } from './flows/after-hours-flow';
 import { mainFlow } from './flows/main-flow';
 
 const SANDBOX_PARAMETER_PREFIX = '/connect/sandbox';
+const RECORDINGS_PREFIX = 'call-recordings/';
+
+const WEEKDAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'] as const;
+
+export interface ConnectHoursProps {
+  readonly timeZone: string;
+  readonly config: ReadonlyArray<{
+    readonly day: typeof WEEKDAYS[number] | 'SATURDAY' | 'SUNDAY';
+    readonly startTime: { readonly hours: number; readonly minutes: number };
+    readonly endTime: { readonly hours: number; readonly minutes: number };
+  }>;
+}
+
+const DEFAULT_HOURS: ConnectHoursProps = {
+  timeZone: 'America/Los_Angeles',
+  config: WEEKDAYS.map((day) => ({
+    day,
+    startTime: { hours: 8, minutes: 0 },
+    endTime: { hours: 17, minutes: 0 },
+  })),
+};
+
+export interface ConnectStackProps extends cdk.StackProps {
+  readonly hours?: ConnectHoursProps;
+}
 const FAQ_SOURCE_NAME = 'HarborRidge311-Faqs';
 
 const BLOCKED_INPUT_MESSAGE = 'I can only help with Harbor Ridge city services, and I cannot take personal information. Please ask about trash pickup, potholes, parking permits, or office hours.';
@@ -56,8 +87,9 @@ function cityQuestionLocale(localeId: string, voiceId: string, assistantArn: str
 }
 
 export class ConnectStack extends cdk.Stack {
-  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+  constructor(scope: Construct, id: string, props: ConnectStackProps = {}) {
     super(scope, id, props);
+    const hours = props.hours ?? DEFAULT_HOURS;
 
     const instanceArn = ssm.StringParameter.valueForStringParameter(
       this,
@@ -83,6 +115,11 @@ export class ConnectStack extends cdk.Stack {
       this,
       `${SANDBOX_PARAMETER_PREFIX}/assistant-id`,
     );
+    const storageBucketName = ssm.StringParameter.valueForStringParameter(
+      this,
+      `${SANDBOX_PARAMETER_PREFIX}/storage-bucket`,
+    );
+    const storageBucket = s3.Bucket.fromBucketName(this, 'StorageBucket', storageBucketName);
 
     const prompts = new connect.CfnDataTable(this, 'Prompts', {
       instanceArn,
@@ -374,6 +411,24 @@ export class ConnectStack extends cdk.Stack {
       integrationArn: botAlias.attrArn,
     });
 
+    const hoursOfOperation = new connect.CfnHoursOfOperation(this, 'Hours', {
+      instanceArn,
+      name: 'HarborRidge311-Hours',
+      timeZone: hours.timeZone,
+      config: hours.config.map((day) => ({
+        day: day.day,
+        startTime: day.startTime,
+        endTime: day.endTime,
+      })),
+    });
+
+    const afterHours = new connect.CfnContactFlow(this, 'AfterHoursFlow', {
+      instanceArn,
+      name: 'HarborRidge311-AfterHours',
+      type: 'CONTACT_FLOW',
+      content: cdk.Fn.toJsonString(afterHoursFlow()),
+    });
+
     const flow = new connect.CfnContactFlow(this, 'MainFlow', {
       instanceArn,
       name: 'HarborRidge311-Main',
@@ -382,6 +437,8 @@ export class ConnectStack extends cdk.Stack {
         dataTableId: cdk.Fn.select(3, cdk.Fn.split('/', prompts.attrArn)),
         wisdomAssistantArn: assistantArn,
         lexBotAliasArn: botAlias.attrArn,
+        hoursOfOperationArn: hoursOfOperation.attrHoursOfOperationArn,
+        afterHoursFlowArn: afterHours.attrContactFlowArn,
       })),
     });
     flow.node.addDependency(...promptRows, lexAssociation);
@@ -419,6 +476,73 @@ export class ConnectStack extends cdk.Stack {
           resources: [instanceArn, phoneNumberArn],
         }),
       ]),
+    });
+
+    const voicemails = new dynamodb.Table(this, 'Voicemails', {
+      tableName: 'HarborRidge311-Voicemails',
+      partitionKey: { name: 'contactId', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: false },
+    });
+
+    const voicemailLogGroup = new logs.LogGroup(this, 'VoicemailIndexerLogs', {
+      logGroupName: '/aws/lambda/HarborRidge311-VoicemailIndexer',
+      retention: logs.RetentionDays.ONE_WEEK,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+    const voicemailRole = new iam.Role(this, 'VoicemailIndexerRole', {
+      assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
+    });
+    voicemailRole.addToPolicy(new iam.PolicyStatement({
+      actions: ['logs:CreateLogStream', 'logs:PutLogEvents'],
+      resources: [cdk.Fn.join('', [voicemailLogGroup.logGroupArn, ':*'])],
+    }));
+    const voicemailIndexer = new nodejs.NodejsFunction(this, 'VoicemailIndexer', {
+      runtime: lambda.Runtime.NODEJS_22_X,
+      entry: path.join(__dirname, 'voicemail-handler.ts'),
+      handler: 'handler',
+      timeout: cdk.Duration.minutes(2),
+      functionName: 'HarborRidge311-VoicemailIndexer',
+      logGroup: voicemailLogGroup,
+      role: voicemailRole,
+      environment: {
+        TABLE_NAME: voicemails.tableName,
+        BUCKET_NAME: storageBucket.bucketName,
+        INSTANCE_ID: instanceId,
+        RECORDINGS_PREFIX,
+      },
+    });
+    voicemailIndexer.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['s3:ListBucket'],
+      resources: [storageBucket.bucketArn],
+      conditions: {
+        StringLike: { 's3:prefix': [RECORDINGS_PREFIX, `${RECORDINGS_PREFIX}*`] },
+      },
+    }));
+    voicemailIndexer.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['s3:GetObject'],
+      resources: [storageBucket.arnForObjects(`${RECORDINGS_PREFIX}*`)],
+    }));
+    voicemailIndexer.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['connect:DescribeContact', 'connect:GetContactAttributes'],
+      resources: [cdk.Fn.join('', [instanceArn, '/contact/*'])],
+    }));
+    voicemailIndexer.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['dynamodb:PutItem'],
+      resources: [voicemails.tableArn],
+    }));
+
+    new events.Rule(this, 'VoicemailDisconnect', {
+      eventPattern: {
+        source: ['aws.connect'],
+        detailType: ['Amazon Connect Contact Event'],
+        detail: {
+          eventType: ['DISCONNECTED'],
+          instanceArn: [instanceArn],
+        },
+      },
+      targets: [new targets.LambdaFunction(voicemailIndexer)],
     });
 
     new cdk.CfnOutput(this, 'ContactFlowArn', {
