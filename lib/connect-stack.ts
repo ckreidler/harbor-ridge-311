@@ -226,7 +226,10 @@ export class ConnectStack extends cdk.Stack {
       blockedInputMessaging: BLOCKED_INPUT_MESSAGE,
       blockedOutputsMessaging: BLOCKED_OUTPUT_MESSAGE,
       sensitiveInformationPolicyConfig: {
-        piiEntitiesConfig: BLOCKED_PII.map((type) => ({ type, action: 'BLOCK' })),
+        piiEntitiesConfig: BLOCKED_PII.map((type) => ({
+          type,
+          action: type === 'ADDRESS' || type === 'NAME' ? 'ANONYMIZE' : 'BLOCK',
+        })),
         regexesConfig: [
           {
             name: 'AccountNumber',
