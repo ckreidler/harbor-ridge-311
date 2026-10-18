@@ -1,6 +1,6 @@
-import { Template } from 'aws-cdk-lib/assertions';
+import { Match, Template } from 'aws-cdk-lib/assertions';
 import * as cdk from 'aws-cdk-lib/core';
-import { ConnectStack } from '../lib/connect-stack';
+import { ConnectStack, VOICEMAIL_RECORDING_KEY_PATTERN } from '../lib/connect-stack';
 
 interface FlowCondition {
   NextAction: string;
@@ -434,47 +434,82 @@ test('ConnectStack records an after-hours voicemail when the office is closed', 
 
   template.hasResourceProperties('AWS::Events::Rule', {
     EventPattern: {
-      source: ['aws.connect'],
-      'detail-type': ['Amazon Connect Contact Event'],
+      source: ['aws.s3'],
+      'detail-type': ['Object Created'],
       detail: {
-        eventType: ['DISCONNECTED'],
+        object: {
+          key: [{ wildcard: VOICEMAIL_RECORDING_KEY_PATTERN }],
+        },
       },
     },
   });
   const rule = JSON.stringify(template.findResources('AWS::Events::Rule'));
-  expect(rule).toContain('DISCONNECTED');
-  expect(rule).toContain('instanceArn');
-  const parameterDefaults = Object.values(template.toJSON().Parameters as Record<string, { Default?: string }>)
-    .map((parameter) => parameter.Default);
+  expect(rule).toContain('Object Created');
+  expect(rule).toContain(VOICEMAIL_RECORDING_KEY_PATTERN);
+  expect(rule).not.toContain('DISCONNECTED');
+  expect(rule).not.toContain('aws.connect');
+  const parameters = template.toJSON().Parameters as Record<string, { Default?: string }>;
+  const storageBucketParameter = Object.entries(parameters).find(([, parameter]) => (
+    parameter.Default === '/connect/sandbox/storage-bucket'
+  ));
+  expect(storageBucketParameter).toBeDefined();
+  expect(rule).toContain(`"Ref":"${storageBucketParameter?.[0]}"`);
+  const parameterDefaults = Object.values(parameters).map((parameter) => parameter.Default);
   expect(parameterDefaults).toContain('/connect/sandbox/instance-arn');
   expect(parameterDefaults).toContain('/connect/sandbox/storage-bucket');
 
-  const indexer = policyStatements(template).filter((statement) => {
-    const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action];
-    return actions.some((action) => (
-      action === 's3:ListBucket'
-      || action === 's3:GetObject'
-      || action === 'dynamodb:PutItem'
-      || action === 'connect:DescribeContact'
-      || action === 'connect:GetContactAttributes'
-    ));
+  template.hasResourceProperties('AWS::Lambda::Function', {
+    FunctionName: 'HarborRidge311-VoicemailIndexer',
+    Timeout: 30,
   });
-  expect(indexer.map((statement) => statement.Action).flat()).toEqual(expect.arrayContaining([
-    's3:ListBucket',
+  template.hasResourceProperties('AWS::SQS::Queue', {
+    QueueName: 'HarborRidge311-VoicemailIndexerFailures',
+    MessageRetentionPeriod: 1_209_600,
+    SqsManagedSseEnabled: true,
+  });
+  const queuePolicy = JSON.stringify(template.findResources('AWS::SQS::QueuePolicy'));
+  expect(queuePolicy).not.toContain('"Principal":"*"');
+  expect(queuePolicy).not.toContain('"AWS":"*"');
+  template.hasResourceProperties('AWS::Lambda::EventInvokeConfig', {
+    DestinationConfig: {
+      OnFailure: {
+        Destination: Match.anyValue(),
+      },
+    },
+  });
+  const invokeConfig = Object.values(template.findResources('AWS::Lambda::EventInvokeConfig')) as Array<{
+    Properties: { MaximumRetryAttempts?: number; DestinationConfig: { OnSuccess?: unknown } };
+  }>;
+  expect(invokeConfig).toHaveLength(1);
+  expect(invokeConfig[0]?.Properties.MaximumRetryAttempts ?? 2).toBe(2);
+  expect(invokeConfig[0]?.Properties.DestinationConfig.OnSuccess).toBeUndefined();
+
+  const indexerPolicies = Object.values(template.findResources('AWS::IAM::Policy') as Record<string, {
+    Properties: { PolicyDocument: { Statement: PolicyStatement[] } };
+  }>).filter((policy) => JSON.stringify(policy).includes('connect:DescribeContact'));
+  expect(indexerPolicies).toHaveLength(1);
+  const indexer = indexerPolicies[0]!.Properties.PolicyDocument.Statement;
+  const indexerActions = indexer.flatMap((statement) => (
+    Array.isArray(statement.Action) ? statement.Action : [statement.Action]
+  ));
+  expect(indexerActions).toEqual(expect.arrayContaining([
     's3:GetObject',
     'dynamodb:PutItem',
     'connect:DescribeContact',
     'connect:GetContactAttributes',
   ]));
+  expect(indexerActions).not.toContain('s3:ListBucket');
+  expect(indexerActions).not.toContain('*');
   for (const statement of indexer) {
     const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action];
-    expect(actions).not.toContain('*');
+    expect(actions.every((action) => !action.includes('*'))).toBe(true);
     expect(resourceValues(statement.Resource).some((resource) => resource === '*')).toBe(false);
   }
   const indexerJson = JSON.stringify(indexer);
   expect(indexerJson).toContain('call-recordings/*');
   expect(indexerJson).toContain('/contact/*');
-  expect(indexerJson).toContain('s3:prefix');
+  expect(indexerJson).not.toContain('s3:prefix');
+  expect(indexerJson).not.toContain('s3:ListBucket');
 });
 
 test('ConnectStack hours can be overridden', () => {

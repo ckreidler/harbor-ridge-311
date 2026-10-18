@@ -7,10 +7,12 @@ import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as kms from 'aws-cdk-lib/aws-kms';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as destinations from 'aws-cdk-lib/aws-lambda-destinations';
 import * as nodejs from 'aws-cdk-lib/aws-lambda-nodejs';
 import * as lex from 'aws-cdk-lib/aws-lex';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
 import * as wisdom from 'aws-cdk-lib/aws-wisdom';
@@ -21,7 +23,8 @@ import { afterHoursFlow } from './flows/after-hours-flow';
 import { mainFlow } from './flows/main-flow';
 
 const SANDBOX_PARAMETER_PREFIX = '/connect/sandbox';
-const RECORDINGS_PREFIX = 'call-recordings/';
+export const RECORDINGS_PREFIX = 'call-recordings/';
+export const VOICEMAIL_RECORDING_KEY_PATTERN = `${RECORDINGS_PREFIX}*ivr/*.wav`;
 
 const WEEKDAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'] as const;
 
@@ -498,28 +501,26 @@ export class ConnectStack extends cdk.Stack {
       actions: ['logs:CreateLogStream', 'logs:PutLogEvents'],
       resources: [cdk.Fn.join('', [voicemailLogGroup.logGroupArn, ':*'])],
     }));
+    const voicemailFailures = new sqs.Queue(this, 'VoicemailIndexerFailures', {
+      queueName: 'HarborRidge311-VoicemailIndexerFailures',
+      retentionPeriod: cdk.Duration.days(14),
+      encryption: sqs.QueueEncryption.SQS_MANAGED,
+    });
     const voicemailIndexer = new nodejs.NodejsFunction(this, 'VoicemailIndexer', {
       runtime: lambda.Runtime.NODEJS_22_X,
       entry: path.join(__dirname, 'voicemail-handler.ts'),
       handler: 'handler',
-      timeout: cdk.Duration.minutes(2),
+      timeout: cdk.Duration.seconds(30),
       functionName: 'HarborRidge311-VoicemailIndexer',
       logGroup: voicemailLogGroup,
       role: voicemailRole,
+      onFailure: new destinations.SqsDestination(voicemailFailures),
       environment: {
         TABLE_NAME: voicemails.tableName,
         BUCKET_NAME: storageBucket.bucketName,
         INSTANCE_ID: instanceId,
-        RECORDINGS_PREFIX,
       },
     });
-    voicemailIndexer.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['s3:ListBucket'],
-      resources: [storageBucket.bucketArn],
-      conditions: {
-        StringLike: { 's3:prefix': [RECORDINGS_PREFIX, `${RECORDINGS_PREFIX}*`] },
-      },
-    }));
     voicemailIndexer.addToRolePolicy(new iam.PolicyStatement({
       actions: ['s3:GetObject'],
       resources: [storageBucket.arnForObjects(`${RECORDINGS_PREFIX}*`)],
@@ -533,13 +534,17 @@ export class ConnectStack extends cdk.Stack {
       resources: [voicemails.tableArn],
     }));
 
-    new events.Rule(this, 'VoicemailDisconnect', {
+    new events.Rule(this, 'VoicemailRecordingCreated', {
       eventPattern: {
-        source: ['aws.connect'],
-        detailType: ['Amazon Connect Contact Event'],
+        source: ['aws.s3'],
+        detailType: ['Object Created'],
         detail: {
-          eventType: ['DISCONNECTED'],
-          instanceArn: [instanceArn],
+          bucket: {
+            name: [storageBucket.bucketName],
+          },
+          object: {
+            key: events.Match.wildcard(VOICEMAIL_RECORDING_KEY_PATTERN),
+          },
         },
       },
       targets: [new targets.LambdaFunction(voicemailIndexer)],
