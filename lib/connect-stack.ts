@@ -71,6 +71,14 @@ export class ConnectStack extends cdk.Stack {
       this,
       `${SANDBOX_PARAMETER_PREFIX}/phone-number`,
     );
+    const assistantArn = ssm.StringParameter.valueForStringParameter(
+      this,
+      `${SANDBOX_PARAMETER_PREFIX}/assistant-arn`,
+    );
+    const assistantId = ssm.StringParameter.valueForStringParameter(
+      this,
+      `${SANDBOX_PARAMETER_PREFIX}/assistant-id`,
+    );
 
     const prompts = new connect.CfnDataTable(this, 'Prompts', {
       instanceArn,
@@ -192,12 +200,6 @@ export class ConnectStack extends cdk.Stack {
       dataIntegration.node.addDependency(faqBucket.policy);
     }
 
-    const assistant = new wisdom.CfnAssistant(this, 'Assistant', {
-      name: 'HarborRidge311-Assistant',
-      type: 'AGENT',
-      description: 'Harbor Ridge 311 assistant',
-    });
-
     const knowledgeBase = new wisdom.CfnKnowledgeBase(this, 'FaqKnowledgeBase', {
       name: FAQ_SOURCE_NAME,
       description: 'Harbor Ridge 311 city FAQ',
@@ -210,18 +212,13 @@ export class ConnectStack extends cdk.Stack {
     });
 
     new wisdom.CfnAssistantAssociation(this, 'FaqAssociation', {
-      assistantId: assistant.attrAssistantId,
+      assistantId,
       associationType: 'KNOWLEDGE_BASE',
       association: {
         knowledgeBaseId: knowledgeBase.attrKnowledgeBaseId,
       },
     });
 
-    new connect.CfnIntegrationAssociation(this, 'AssistantIntegration', {
-      instanceId: instanceArn,
-      integrationType: 'WISDOM_ASSISTANT',
-      integrationArn: assistant.attrAssistantArn,
-    });
     new connect.CfnIntegrationAssociation(this, 'KnowledgeBaseIntegration', {
       instanceId: instanceArn,
       integrationType: 'WISDOM_KNOWLEDGE_BASE',
@@ -229,7 +226,7 @@ export class ConnectStack extends cdk.Stack {
     });
 
     const guardrail = new wisdom.CfnAIGuardrail(this, 'SelfServiceGuardrail', {
-      assistantId: assistant.attrAssistantId,
+      assistantId,
       name: 'HarborRidge311-Guardrail',
       description: 'Blocks off-topic requests and personal information.',
       blockedInputMessaging: BLOCKED_INPUT_MESSAGE,
@@ -253,7 +250,7 @@ export class ConnectStack extends cdk.Stack {
       },
     });
     const guardrailVersion = new wisdom.CfnAIGuardrailVersion(this, 'SelfServiceGuardrailVersion', {
-      assistantId: assistant.attrAssistantId,
+      assistantId,
       aiGuardrailId: guardrail.attrAiGuardrailId,
     });
     const guardrailVersionId = cdk.Fn.join(':', [
@@ -262,7 +259,7 @@ export class ConnectStack extends cdk.Stack {
     ]);
 
     const selfServiceAgent = new wisdom.CfnAIAgent(this, 'SelfServiceAgent', {
-      assistantId: assistant.attrAssistantId,
+      assistantId,
       name: 'HarborRidge311-SelfService',
       type: 'SELF_SERVICE',
       description: 'Answers Harbor Ridge city questions from the FAQ knowledge base.',
@@ -273,7 +270,7 @@ export class ConnectStack extends cdk.Stack {
       },
     });
     const selfServiceAgentVersion = new wisdom.CfnAIAgentVersion(this, 'SelfServiceAgentVersion', {
-      assistantId: assistant.attrAssistantId,
+      assistantId,
       aiAgentId: selfServiceAgent.attrAiAgentId,
     });
     const selfServiceAgentVersionId = cdk.Fn.join(':', [
@@ -285,7 +282,7 @@ export class ConnectStack extends cdk.Stack {
       service: 'QConnect',
       action: 'UpdateAssistantAIAgent',
       parameters: {
-        assistantId: assistant.attrAssistantId,
+        assistantId,
         aiAgentType: 'SELF_SERVICE',
         configuration: {
           aiAgentId: selfServiceAgentVersionId,
@@ -300,7 +297,7 @@ export class ConnectStack extends cdk.Stack {
       policy: cr.AwsCustomResourcePolicy.fromStatements([
         new iam.PolicyStatement({
           actions: ['wisdom:UpdateAssistantAIAgent'],
-          resources: [assistant.attrAssistantArn],
+          resources: [assistantArn],
         }),
       ]),
     });
@@ -311,8 +308,8 @@ export class ConnectStack extends cdk.Stack {
     botRole.addToPolicy(new iam.PolicyStatement({
       actions: ['wisdom:CreateSession', 'wisdom:GetAssistant'],
       resources: [
-        assistant.attrAssistantArn,
-        cdk.Fn.join('', [assistant.attrAssistantArn, '/*']),
+        assistantArn,
+        cdk.Fn.join('', [assistantArn, '/*']),
       ],
     }));
     botRole.addToPolicy(new iam.PolicyStatement({
@@ -321,7 +318,7 @@ export class ConnectStack extends cdk.Stack {
         this.formatArn({
           service: 'wisdom',
           resource: 'session',
-          resourceName: `${assistant.attrAssistantId}/*`,
+          resourceName: cdk.Fn.join('', [assistantId, '/*']),
         }),
       ],
     }));
@@ -334,8 +331,8 @@ export class ConnectStack extends cdk.Stack {
       idleSessionTtlInSeconds: 600,
       autoBuildBotLocales: true,
       botLocales: [
-        cityQuestionLocale('en_US', 'Joanna', assistant.attrAssistantArn),
-        cityQuestionLocale('es_US', 'Lupe', assistant.attrAssistantArn),
+        cityQuestionLocale('en_US', 'Joanna', assistantArn),
+        cityQuestionLocale('es_US', 'Lupe', assistantArn),
       ],
     });
     const botVersion = new lex.CfnBotVersion(this, 'CityQuestionsBotVersion', {
@@ -362,7 +359,7 @@ export class ConnectStack extends cdk.Stack {
       type: 'CONTACT_FLOW',
       content: cdk.Fn.toJsonString(mainFlow({
         dataTableId: cdk.Fn.select(3, cdk.Fn.split('/', prompts.attrArn)),
-        wisdomAssistantArn: assistant.attrAssistantArn,
+        wisdomAssistantArn: assistantArn,
         lexBotAliasArn: botAlias.attrArn,
       })),
     });
@@ -413,8 +410,8 @@ export class ConnectStack extends cdk.Stack {
     });
 
     new cdk.CfnOutput(this, 'AssistantArn', {
-      value: assistant.attrAssistantArn,
-      description: 'ARN of the Harbor Ridge 311 Q in Connect assistant',
+      value: assistantArn,
+      description: 'Sandbox Q in Connect assistant ARN',
     });
 
     new cdk.CfnOutput(this, 'LexBotAliasArn', {

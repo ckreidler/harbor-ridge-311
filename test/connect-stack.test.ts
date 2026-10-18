@@ -169,7 +169,7 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
   template.resourceCountIs('AWS::S3::Bucket', 1);
   template.resourceCountIs('AWS::KMS::Key', 1);
   template.resourceCountIs('AWS::AppIntegrations::DataIntegration', 1);
-  template.resourceCountIs('AWS::Wisdom::Assistant', 1);
+  template.resourceCountIs('AWS::Wisdom::Assistant', 0);
   template.resourceCountIs('AWS::Wisdom::KnowledgeBase', 1);
   template.resourceCountIs('AWS::Wisdom::AssistantAssociation', 1);
   template.resourceCountIs('AWS::Wisdom::AIGuardrail', 1);
@@ -180,7 +180,7 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
   template.resourceCountIs('AWS::Lex::Bot', 1);
   template.resourceCountIs('AWS::Lex::BotVersion', 1);
   template.resourceCountIs('AWS::Lex::BotAlias', 1);
-  template.resourceCountIs('AWS::Connect::IntegrationAssociation', 3);
+  template.resourceCountIs('AWS::Connect::IntegrationAssociation', 2);
   template.resourceCountIs('Custom::AWS', 2);
 
   template.hasResourceProperties('AWS::S3::Bucket', {
@@ -208,10 +208,6 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
     Name: 'HarborRidge311-Faqs',
     KnowledgeBaseType: 'EXTERNAL',
   });
-  template.hasResourceProperties('AWS::Wisdom::Assistant', {
-    Name: 'HarborRidge311-Assistant',
-    Type: 'AGENT',
-  });
   template.hasResourceProperties('AWS::Wisdom::AssistantAssociation', {
     AssociationType: 'KNOWLEDGE_BASE',
   });
@@ -237,7 +233,14 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
   const integrationTypes = Object.values(integrations).map((resource) => (
     resource as { Properties: { IntegrationType: string } }
   ).Properties.IntegrationType);
-  expect(integrationTypes.sort()).toEqual(['LEX_BOT', 'WISDOM_ASSISTANT', 'WISDOM_KNOWLEDGE_BASE']);
+  expect(integrationTypes.sort()).toEqual(['LEX_BOT', 'WISDOM_KNOWLEDGE_BASE']);
+
+  const parameterDefaults = Object.values(template.toJSON().Parameters as Record<string, { Default?: string }>)
+    .map((parameter) => parameter.Default);
+  expect(parameterDefaults).toEqual(expect.arrayContaining([
+    '/connect/sandbox/assistant-arn',
+    '/connect/sandbox/assistant-id',
+  ]));
 
   const bot = JSON.stringify(template.findResources('AWS::Lex::Bot'));
   expect(bot).toContain('AMAZON.QinConnectIntent');
@@ -290,6 +293,10 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
   for (const statement of wisdomStatements) {
     expect(resourceValues(statement.Resource).some((resource) => resource === '*')).toBe(false);
   }
+  const wisdomResources = wisdomStatements.flatMap((statement) => resourceValues(statement.Resource)).join('\n');
+  expect(wisdomResources).toContain('assistantarn');
+  expect(wisdomResources).toContain('assistantid');
+  expect(wisdomResources).not.toContain('Assistant.AssistantArn');
 
   const keyPolicy = JSON.stringify(template.findResources('AWS::KMS::Key'));
   expect(keyPolicy).toContain('"Resource":"*"');
