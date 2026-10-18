@@ -97,7 +97,7 @@ export function afterHoursFlow(): ContactFlowContent {
         },
         Transitions: {
           NextAction: 'leave-message',
-          Errors: errorTo('leave-message'),
+          Errors: [],
           Conditions: [],
         },
       },
