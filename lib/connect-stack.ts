@@ -30,6 +30,10 @@ const BLOCKED_PII = [
   'US_BANK_ACCOUNT_NUMBER',
 ];
 
+function enabledLocale(localeId: string) {
+  return { localeId, botAliasLocaleSetting: { enabled: true } };
+}
+
 function cityQuestionLocale(localeId: string, voiceId: string, assistantArn: string): lex.CfnBot.BotLocaleProperty {
   return {
     localeId,
@@ -327,6 +331,9 @@ export class ConnectStack extends cdk.Stack {
       dataPrivacy: { ChildDirected: false },
       idleSessionTtlInSeconds: 600,
       autoBuildBotLocales: true,
+      testBotAliasSettings: {
+        botAliasLocaleSettings: [enabledLocale('en_US'), enabledLocale('es_US')],
+      },
       botLocales: [
         cityQuestionLocale('en_US', 'Joanna', assistantArn),
         cityQuestionLocale('es_US', 'Lupe', assistantArn),
@@ -343,6 +350,7 @@ export class ConnectStack extends cdk.Stack {
       botId: bot.attrId,
       botAliasName: 'live',
       botVersion: botVersion.attrBotVersion,
+      botAliasLocaleSettings: [enabledLocale('en_US'), enabledLocale('es_US')],
     });
     const lexAssociation = new connect.CfnIntegrationAssociation(this, 'LexBotIntegration', {
       instanceId: instanceArn,

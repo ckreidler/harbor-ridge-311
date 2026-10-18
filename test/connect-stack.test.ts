@@ -271,6 +271,22 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
     '/connect/sandbox/assistant-id',
   ]));
 
+  template.hasResourceProperties('AWS::Lex::BotAlias', {
+    BotAliasName: 'live',
+    BotAliasLocaleSettings: [
+      { LocaleId: 'en_US', BotAliasLocaleSetting: { Enabled: true } },
+      { LocaleId: 'es_US', BotAliasLocaleSetting: { Enabled: true } },
+    ],
+  });
+  template.hasResourceProperties('AWS::Lex::Bot', {
+    TestBotAliasSettings: {
+      BotAliasLocaleSettings: [
+        { LocaleId: 'en_US', BotAliasLocaleSetting: { Enabled: true } },
+        { LocaleId: 'es_US', BotAliasLocaleSetting: { Enabled: true } },
+      ],
+    },
+  });
+
   const bot = JSON.stringify(template.findResources('AWS::Lex::Bot'));
   expect(bot).toContain('AMAZON.QInConnectIntent');
   expect(bot).not.toContain('AMAZON.QinConnectIntent');
