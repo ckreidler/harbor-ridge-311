@@ -1,14 +1,36 @@
-# Welcome to your CDK TypeScript project
+# Harbor Ridge 311
 
-This is a blank project for CDK development with TypeScript.
+Portfolio demo of a fictional city 311 line. `WebsiteStack` is the static site. `ConnectStack` is the phone demo on the existing Amazon Connect sandbox instance.
 
 The `cdk.json` file tells the CDK Toolkit how to execute your app.
+
+## ConnectStack
+
+`ConnectStack` reads the sandbox instance published by [connect-platform](https://github.com/ckreidler/connect-platform) and adds a contact flow named `HarborRidge311-Main`. The flow sets the Joanna voice, plays a short demo greeting, and hangs up. An error branch hangs up as well. A custom resource calls `AssociatePhoneNumberContactFlow` so the sandbox number uses this flow, and `DisassociatePhoneNumberContactFlow` when the stack is deleted.
+
+SSM parameters, read at deploy time with `StringParameter.valueForStringParameter`:
+
+- `/connect/sandbox/instance-arn`
+- `/connect/sandbox/instance-id`
+- `/connect/sandbox/phone-number-arn`
+- `/connect/sandbox/phone-number`
+
+This app has no stage context. connect-platform only publishes `sandbox`, so those paths live in one constant, `SANDBOX_PARAMETER_PREFIX`, in `lib/connect-stack.ts`.
+
+Deploy `ConnectStack` with credentials for account `945777367807`. The region is your AWS configuration, the same `CDK_DEFAULT_REGION` the platform stack uses:
+
+```bash
+npx cdk deploy ConnectStack
+```
+
+Outputs are the contact flow ARN and the phone number.
 
 ## Useful commands
 
 * `npm run build`   type-check the project
 * `npm run watch`   watch for changes and type-check
 * `npm run test`    perform the jest unit tests
-* `npx cdk deploy`  deploy this stack to your default AWS account/region
+* `npx cdk deploy WebsiteStack`  deploy the static site
+* `npx cdk deploy ConnectStack`  deploy the contact flow
 * `npx cdk diff`    compare deployed stack with current state
 * `npx cdk synth`   emits the synthesized CloudFormation template
