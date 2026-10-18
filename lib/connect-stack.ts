@@ -42,7 +42,7 @@ function cityQuestionLocale(localeId: string, voiceId: string, assistantArn: str
       },
       {
         name: 'CityQuestion',
-        parentIntentSignature: 'AMAZON.QinConnectIntent',
+        parentIntentSignature: 'AMAZON.QInConnectIntent',
         qInConnectIntentConfiguration: {
           qInConnectAssistantConfiguration: { assistantArn },
         },
@@ -107,27 +107,18 @@ export class ConnectStack extends cdk.Stack {
       name: 'Goodbye',
       valueType: 'TEXT',
     });
-    const questionAttribute = new connect.CfnDataTableAttribute(this, 'QuestionAttribute', {
-      instanceArn,
-      dataTableArn: prompts.attrArn,
-      name: 'Question',
-      valueType: 'TEXT',
-    });
-
     const promptRows = [
       {
         id: 'EnglishPrompt',
         language: 'en-US',
         greeting: 'Thank you for calling Harbor Ridge 3 1 1. This line is a demo.',
         goodbye: 'Thank you for calling Harbor Ridge 3 1 1. Goodbye.',
-        question: 'What can I help you with? You can ask about trash pickup, potholes, parking permits, or office hours. Say agent if you would rather talk to a person.',
       },
       {
         id: 'SpanishPrompt',
         language: 'es-US',
         greeting: 'Gracias por llamar a Harbor Ridge tres uno uno. Esta línea es una demostración.',
         goodbye: 'Gracias por llamar a Harbor Ridge tres uno uno. Adiós.',
-        question: '¿En qué puedo ayudarle? Puede preguntar sobre la recolección de basura, los baches, los permisos de estacionamiento o el horario. Diga agente si prefiere hablar con una persona.',
       },
     ].map((row) => new connect.CfnDataTableRecord(this, row.id, {
       instanceArn,
@@ -140,7 +131,6 @@ export class ConnectStack extends cdk.Stack {
         values: [
           { attributeId: greetingAttribute.attrAttributeId, attributeValue: row.greeting },
           { attributeId: goodbyeAttribute.attrAttributeId, attributeValue: row.goodbye },
-          { attributeId: questionAttribute.attrAttributeId, attributeValue: row.question },
         ],
       },
     }));
@@ -293,9 +283,17 @@ export class ConnectStack extends cdk.Stack {
       installLatestAwsSdk: true,
       onCreate: setDefaultAgentCall,
       onUpdate: setDefaultAgentCall,
+      onDelete: {
+        service: 'QConnect',
+        action: 'RemoveAssistantAIAgent',
+        parameters: {
+          assistantId,
+          aiAgentType: 'SELF_SERVICE',
+        },
+      },
       policy: cr.AwsCustomResourcePolicy.fromStatements([
         new iam.PolicyStatement({
-          actions: ['wisdom:UpdateAssistantAIAgent'],
+          actions: ['wisdom:UpdateAssistantAIAgent', 'wisdom:RemoveAssistantAIAgent'],
           resources: [assistantArn],
         }),
       ]),
@@ -362,7 +360,8 @@ export class ConnectStack extends cdk.Stack {
         lexBotAliasArn: botAlias.attrArn,
       })),
     });
-    flow.node.addDependency(...promptRows, setDefaultAgent, lexAssociation);
+    flow.node.addDependency(...promptRows, lexAssociation);
+    setDefaultAgent.node.addDependency(botAlias, flow);
 
     const associateCall: cr.AwsSdkCall = {
       service: 'connect',

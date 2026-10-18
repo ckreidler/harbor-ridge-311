@@ -54,7 +54,7 @@ test('ConnectStack selects a language, looks up prompts, and associates the sand
 
   template.resourceCountIs('AWS::Connect::ContactFlow', 1);
   template.resourceCountIs('AWS::Connect::DataTable', 1);
-  template.resourceCountIs('AWS::Connect::DataTableAttribute', 4);
+  template.resourceCountIs('AWS::Connect::DataTableAttribute', 3);
   template.resourceCountIs('AWS::Connect::DataTableRecord', 2);
 
   template.hasResourceProperties('AWS::Connect::DataTable', {
@@ -74,8 +74,7 @@ test('ConnectStack selects a language, looks up prompts, and associates the sand
   expect(records).toContain('es-US');
   expect(records).toContain('Gracias por llamar a Harbor Ridge tres uno uno. Esta línea es una demostración.');
   expect(records).toContain('Gracias por llamar a Harbor Ridge tres uno uno. Adiós.');
-  expect(records).toContain('Say agent if you would rather talk to a person.');
-  expect(records).toContain('Diga agente si prefiere hablar con una persona.');
+  expect(records).not.toContain('Question');
 
   const flows = template.findResources('AWS::Connect::ContactFlow');
   const flow = Object.values(flows)[0] as {
@@ -106,7 +105,7 @@ test('ConnectStack selects a language, looks up prompts, and associates the sand
   expect(JSON.stringify(flow.Properties.Content)).toContain('Prompts');
   const lookup = content.Actions.find((action) => action.Type === 'EvaluateDataTableValues');
   expect(lookup?.Parameters?.Queries?.[0].QueryName).toBe('Prompts');
-  expect(lookup?.Parameters?.Queries?.[0].Attributes).toEqual(['Greeting', 'Goodbye', 'Question']);
+  expect(lookup?.Parameters?.Queries?.[0].Attributes).toEqual(['Greeting', 'Goodbye']);
   expect(lookup?.Parameters?.Queries?.[0].PrimaryValues).toEqual([
     { AttributeName: 'Language', Value: '$.LanguageCode' },
   ]);
@@ -273,7 +272,8 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
   ]));
 
   const bot = JSON.stringify(template.findResources('AWS::Lex::Bot'));
-  expect(bot).toContain('AMAZON.QinConnectIntent');
+  expect(bot).toContain('AMAZON.QInConnectIntent');
+  expect(bot).not.toContain('AMAZON.QinConnectIntent');
   expect(bot).toContain('AMAZON.FallbackIntent');
   expect(bot).toContain('en_US');
   expect(bot).toContain('es_US');
@@ -281,24 +281,35 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
 
   const customResources = JSON.stringify(template.findResources('Custom::AWS'));
   expect(customResources).toContain('UpdateAssistantAIAgent');
+  expect(customResources).toContain('RemoveAssistantAIAgent');
   expect(customResources).toContain('SELF_SERVICE');
   expect(customResources).toContain('QConnect');
   expect(customResources).toContain('assistantId');
   expect(customResources).toContain('aiAgentId');
+  const setDefault = Object.values(template.findResources('Custom::AWS')).find((resource) =>
+    JSON.stringify(resource).includes('UpdateAssistantAIAgent')) as { DependsOn?: string | string[] };
+  expect([setDefault.DependsOn].flat()).toEqual(expect.arrayContaining(['MainFlow', 'CityQuestionsBotAlias']));
 
   const flows = template.findResources('AWS::Connect::ContactFlow');
   const flow = Object.values(flows)[0] as { Properties: { Content: unknown } };
   const content = flowDocument(flow.Properties.Content);
   const session = content.Actions.find((action) => action.Type === 'CreateWisdomSession');
-  const lexBot = content.Actions.find((action) => action.Type === 'ConnectParticipantWithLexBot');
-  const toolCheck = content.Actions.find((action) => action.Type === 'Compare');
+  const lexBots = content.Actions.filter((action) => action.Type === 'ConnectParticipantWithLexBot');
+  const toolCheck = content.Actions.find((action) => action.Identifier === 'check-tool');
+  const questionLanguage = content.Actions.find((action) => action.Identifier === 'check-question-language');
   expect(session?.Parameters?.WisdomAssistantArn).toBe('token');
-  expect(session?.Transitions?.NextAction).toBe('ask-city-question');
+  expect(session?.Transitions?.NextAction).toBe('check-question-language');
   expect(session?.Transitions?.Errors?.[0].NextAction).toBe('play-goodbye');
-  expect(lexBot?.Parameters?.Text).toBe('$.DataTables.Prompts.Question');
-  expect(lexBot?.Parameters?.LexV2Bot?.AliasArn).toBe('token');
-  expect(lexBot?.Transitions?.NextAction).toBe('check-tool');
-  expect(lexBot?.Transitions?.Errors?.map((error) => error.NextAction)).toEqual([
+  expect(questionLanguage?.Parameters?.ComparisonValue).toBe('$.LanguageCode');
+  expect(questionLanguage?.Transitions?.Conditions?.find((branch) => branch.Condition.Operands[0] === 'es-US')?.NextAction)
+    .toBe('ask-es-question');
+  expect(lexBots.map((action) => action.Parameters?.Text)).toEqual(expect.arrayContaining([
+    'What can I help you with? You can ask about trash pickup, potholes, parking permits, or office hours. Say agent if you would rather talk to a person.',
+    '¿En qué puedo ayudarle? Puede preguntar sobre la recolección de basura, los baches, los permisos de estacionamiento o el horario. Diga agente si prefiere hablar con una persona.',
+  ]));
+  expect(lexBots.every((action) => action.Parameters?.LexV2Bot?.AliasArn === 'token')).toBe(true);
+  expect(lexBots.every((action) => action.Transitions?.NextAction === 'check-tool')).toBe(true);
+  expect(lexBots[0]?.Transitions?.Errors?.map((error) => error.NextAction)).toEqual([
     'play-goodbye',
     'play-goodbye',
     'play-goodbye',

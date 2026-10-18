@@ -42,6 +42,8 @@ export interface MainFlowProps {
 
 const ENGLISH_GREETING = 'Thank you for calling Harbor Ridge 3 1 1. This line is a demo.';
 const ENGLISH_GOODBYE = 'Thank you for calling Harbor Ridge 3 1 1. Goodbye.';
+const ENGLISH_QUESTION = 'What can I help you with? You can ask about trash pickup, potholes, parking permits, or office hours. Say agent if you would rather talk to a person.';
+const SPANISH_QUESTION = '¿En qué puedo ayudarle? Puede preguntar sobre la recolección de basura, los baches, los permisos de estacionamiento o el horario. Diga agente si prefiere hablar con una persona.';
 
 function errorTo(nextAction: string): FlowError[] {
   return [{ ErrorType: 'NoMatchingError', NextAction: nextAction }];
@@ -62,10 +64,12 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
         'lookup-prompts': { position: { x: 1040, y: 160 } },
         'play-greeting': { position: { x: 1290, y: 160 } },
         'create-assistant-session': { position: { x: 1540, y: 160 } },
-        'ask-city-question': { position: { x: 1790, y: 160 } },
-        'check-tool': { position: { x: 2040, y: 160 } },
-        'play-goodbye': { position: { x: 2290, y: 160 } },
-        disconnect: { position: { x: 2540, y: 160 } },
+        'check-question-language': { position: { x: 1790, y: 160 } },
+        'ask-en-question': { position: { x: 2040, y: 40 } },
+        'ask-es-question': { position: { x: 2040, y: 280 } },
+        'check-tool': { position: { x: 2290, y: 160 } },
+        'play-goodbye': { position: { x: 2540, y: 160 } },
+        disconnect: { position: { x: 2790, y: 160 } },
         'play-fallback': { position: { x: 1290, y: 400 } },
       },
     },
@@ -157,7 +161,7 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
           Queries: [
             {
               QueryName: 'Prompts',
-              Attributes: ['Greeting', 'Goodbye', 'Question'],
+              Attributes: ['Greeting', 'Goodbye'],
               PrimaryValues: [
                 { AttributeName: 'Language', Value: '$.LanguageCode' },
               ],
@@ -189,16 +193,58 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
           WisdomAssistantArn: props.wisdomAssistantArn,
         },
         Transitions: {
-          NextAction: 'ask-city-question',
+          NextAction: 'check-question-language',
           Errors: errorTo('play-goodbye'),
           Conditions: [],
         },
       },
       {
-        Identifier: 'ask-city-question',
+        Identifier: 'check-question-language',
+        Type: 'Compare',
+        Parameters: {
+          ComparisonValue: '$.LanguageCode',
+        },
+        Transitions: {
+          NextAction: 'ask-en-question',
+          Conditions: [
+            {
+              NextAction: 'ask-en-question',
+              Condition: { Operator: 'Equals', Operands: ['en-US'] },
+            },
+            {
+              NextAction: 'ask-es-question',
+              Condition: { Operator: 'Equals', Operands: ['es-US'] },
+            },
+          ],
+          Errors: [
+            { ErrorType: 'NoMatchingCondition', NextAction: 'ask-en-question' },
+          ],
+        },
+      },
+      {
+        Identifier: 'ask-en-question',
         Type: 'ConnectParticipantWithLexBot',
         Parameters: {
-          Text: '$.DataTables.Prompts.Question',
+          Text: ENGLISH_QUESTION,
+          LexV2Bot: {
+            AliasArn: props.lexBotAliasArn,
+          },
+        },
+        Transitions: {
+          NextAction: 'check-tool',
+          Errors: [
+            { ErrorType: 'InputTimeLimitExceeded', NextAction: 'play-goodbye' },
+            { ErrorType: 'NoMatchingCondition', NextAction: 'play-goodbye' },
+            { ErrorType: 'NoMatchingError', NextAction: 'play-goodbye' },
+          ],
+          Conditions: [],
+        },
+      },
+      {
+        Identifier: 'ask-es-question',
+        Type: 'ConnectParticipantWithLexBot',
+        Parameters: {
+          Text: SPANISH_QUESTION,
           LexV2Bot: {
             AliasArn: props.lexBotAliasArn,
           },
