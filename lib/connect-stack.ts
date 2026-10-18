@@ -26,12 +26,24 @@ interface ContactFlowAction {
 interface ContactFlowContent {
   Version: '2019-10-30';
   StartAction: string;
+  Metadata: {
+    entryPointPosition: { x: number; y: number };
+    ActionMetadata: Record<string, { position: { x: number; y: number } }>;
+  };
   Actions: ContactFlowAction[];
 }
 
 const mainFlow: ContactFlowContent = {
   Version: '2019-10-30',
   StartAction: 'set-voice',
+  Metadata: {
+    entryPointPosition: { x: 40, y: 40 },
+    ActionMetadata: {
+      'set-voice': { position: { x: 290, y: 40 } },
+      'play-greeting': { position: { x: 540, y: 40 } },
+      disconnect: { position: { x: 790, y: 40 } },
+    },
+  },
   Actions: [
     {
       Identifier: 'set-voice',
