@@ -4,6 +4,7 @@ import * as connect from 'aws-cdk-lib/aws-connect';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as kms from 'aws-cdk-lib/aws-kms';
 import * as lex from 'aws-cdk-lib/aws-lex';
+import * as logs from 'aws-cdk-lib/aws-logs';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
@@ -304,6 +305,19 @@ export class ConnectStack extends cdk.Stack {
       ],
     }));
     botRole.addToPolicy(new iam.PolicyStatement({
+      actions: ['polly:SynthesizeSpeech'],
+      resources: ['*'],
+    }));
+    const lexTextLogs = new logs.LogGroup(this, 'CityQuestionsTextLogs', {
+      logGroupName: '/aws/lex/HarborRidge311-CityQuestions',
+      retention: logs.RetentionDays.ONE_WEEK,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+    botRole.addToPolicy(new iam.PolicyStatement({
+      actions: ['logs:CreateLogStream', 'logs:PutLogEvents'],
+      resources: [cdk.Fn.join('', [lexTextLogs.logGroupArn, ':*'])],
+    }));
+    botRole.addToPolicy(new iam.PolicyStatement({
       actions: ['wisdom:SendMessage', 'wisdom:GetNextMessage'],
       resources: [
         this.formatArn({
@@ -341,7 +355,19 @@ export class ConnectStack extends cdk.Stack {
       botAliasName: 'live',
       botVersion: botVersion.attrBotVersion,
       botAliasLocaleSettings: [enabledLocale('en_US'), enabledLocale('es_US')],
+      conversationLogSettings: {
+        textLogSettings: [{
+          enabled: true,
+          destination: {
+            cloudWatch: {
+              cloudWatchLogGroupArn: lexTextLogs.logGroupArn,
+              logPrefix: 'live',
+            },
+          },
+        }],
+      },
     });
+    botAlias.node.addDependency(botRole.node.findChild('DefaultPolicy'));
     const lexAssociation = new connect.CfnIntegrationAssociation(this, 'LexBotIntegration', {
       instanceId: instanceArn,
       integrationType: 'LEX_BOT',
