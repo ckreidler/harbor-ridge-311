@@ -36,10 +36,14 @@ interface ContactFlowContent {
 
 export interface MainFlowProps {
   dataTableId: string;
+  wisdomAssistantArn: string;
+  lexBotAliasArn: string;
 }
 
 const ENGLISH_GREETING = 'Thank you for calling Harbor Ridge 3 1 1. This line is a demo.';
 const ENGLISH_GOODBYE = 'Thank you for calling Harbor Ridge 3 1 1. Goodbye.';
+const ENGLISH_QUESTION = 'What can I help you with? You can ask about trash pickup, potholes, parking permits, or office hours. Say agent if you would rather talk to a person.';
+const SPANISH_QUESTION = '¿En qué puedo ayudarle? Puede preguntar sobre la recolección de basura, los baches, los permisos de estacionamiento o el horario. Diga agente si prefiere hablar con una persona.';
 
 function errorTo(nextAction: string): FlowError[] {
   return [{ ErrorType: 'NoMatchingError', NextAction: nextAction }];
@@ -48,23 +52,39 @@ function errorTo(nextAction: string): FlowError[] {
 export function mainFlow(props: MainFlowProps): ContactFlowContent {
   return {
     Version: '2019-10-30',
-    StartAction: 'select-language',
+    StartAction: 'enable-flow-logging',
     Metadata: {
       entryPointPosition: { x: 40, y: 40 },
       ActionMetadata: {
-        'select-language': { position: { x: 290, y: 160 } },
-        'set-en-language': { position: { x: 540, y: 40 } },
-        'set-en-voice': { position: { x: 790, y: 40 } },
-        'set-es-language': { position: { x: 540, y: 280 } },
-        'set-es-voice': { position: { x: 790, y: 280 } },
-        'lookup-prompts': { position: { x: 1040, y: 160 } },
-        'play-greeting': { position: { x: 1290, y: 160 } },
-        'play-goodbye': { position: { x: 1540, y: 160 } },
-        disconnect: { position: { x: 1790, y: 160 } },
-        'play-fallback': { position: { x: 1290, y: 400 } },
+        'enable-flow-logging': { position: { x: 290, y: 160 } },
+        'select-language': { position: { x: 540, y: 160 } },
+        'set-en-language': { position: { x: 790, y: 40 } },
+        'set-en-voice': { position: { x: 1040, y: 40 } },
+        'set-es-language': { position: { x: 790, y: 280 } },
+        'set-es-voice': { position: { x: 1040, y: 280 } },
+        'lookup-prompts': { position: { x: 1290, y: 160 } },
+        'play-greeting': { position: { x: 1540, y: 160 } },
+        'create-assistant-session': { position: { x: 1790, y: 160 } },
+        'check-question-language': { position: { x: 2040, y: 160 } },
+        'ask-en-question': { position: { x: 2290, y: 40 } },
+        'ask-es-question': { position: { x: 2290, y: 280 } },
+        'check-tool': { position: { x: 2540, y: 160 } },
+        'play-goodbye': { position: { x: 2790, y: 160 } },
+        disconnect: { position: { x: 3040, y: 160 } },
+        'play-fallback': { position: { x: 1540, y: 400 } },
       },
     },
     Actions: [
+      {
+        Identifier: 'enable-flow-logging',
+        Type: 'UpdateFlowLoggingBehavior',
+        Parameters: {
+          FlowLoggingBehavior: 'Enabled',
+        },
+        Transitions: {
+          NextAction: 'select-language',
+        },
+      },
       {
         Identifier: 'select-language',
         Type: 'GetParticipantInput',
@@ -172,9 +192,107 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
           Text: '$.DataTables.Prompts.Greeting',
         },
         Transitions: {
-          NextAction: 'play-goodbye',
+          NextAction: 'create-assistant-session',
           Errors: errorTo('play-fallback'),
           Conditions: [],
+        },
+      },
+      {
+        Identifier: 'create-assistant-session',
+        Type: 'CreateWisdomSession',
+        Parameters: {
+          WisdomAssistantArn: props.wisdomAssistantArn,
+        },
+        Transitions: {
+          NextAction: 'check-question-language',
+          Errors: errorTo('play-goodbye'),
+          Conditions: [],
+        },
+      },
+      {
+        Identifier: 'check-question-language',
+        Type: 'Compare',
+        Parameters: {
+          ComparisonValue: '$.LanguageCode',
+        },
+        Transitions: {
+          NextAction: 'ask-en-question',
+          Conditions: [
+            {
+              NextAction: 'ask-en-question',
+              Condition: { Operator: 'Equals', Operands: ['en-US'] },
+            },
+            {
+              NextAction: 'ask-es-question',
+              Condition: { Operator: 'Equals', Operands: ['es-US'] },
+            },
+          ],
+          Errors: [
+            { ErrorType: 'NoMatchingCondition', NextAction: 'ask-en-question' },
+          ],
+        },
+      },
+      {
+        Identifier: 'ask-en-question',
+        Type: 'ConnectParticipantWithLexBot',
+        Parameters: {
+          Text: ENGLISH_QUESTION,
+          LexV2Bot: {
+            AliasArn: props.lexBotAliasArn,
+          },
+          LexSessionAttributes: {
+            'x-amz-lex:q-in-connect:session-arn': '$.Wisdom.SessionArn',
+          },
+        },
+        Transitions: {
+          NextAction: 'check-tool',
+          Errors: [
+            { ErrorType: 'InputTimeLimitExceeded', NextAction: 'play-goodbye' },
+            { ErrorType: 'NoMatchingCondition', NextAction: 'play-goodbye' },
+            { ErrorType: 'NoMatchingError', NextAction: 'play-goodbye' },
+          ],
+          Conditions: [],
+        },
+      },
+      {
+        Identifier: 'ask-es-question',
+        Type: 'ConnectParticipantWithLexBot',
+        Parameters: {
+          Text: SPANISH_QUESTION,
+          LexV2Bot: {
+            AliasArn: props.lexBotAliasArn,
+          },
+          LexSessionAttributes: {
+            'x-amz-lex:q-in-connect:session-arn': '$.Wisdom.SessionArn',
+          },
+        },
+        Transitions: {
+          NextAction: 'check-tool',
+          Errors: [
+            { ErrorType: 'InputTimeLimitExceeded', NextAction: 'play-goodbye' },
+            { ErrorType: 'NoMatchingCondition', NextAction: 'play-goodbye' },
+            { ErrorType: 'NoMatchingError', NextAction: 'play-goodbye' },
+          ],
+          Conditions: [],
+        },
+      },
+      {
+        Identifier: 'check-tool',
+        Type: 'Compare',
+        Parameters: {
+          ComparisonValue: '$.Lex.SessionAttributes.Tool',
+        },
+        Transitions: {
+          NextAction: 'play-goodbye',
+          Conditions: [
+            {
+              NextAction: 'play-goodbye',
+              Condition: { Operator: 'Equals', Operands: ['COMPLETE'] },
+            },
+          ],
+          Errors: [
+            { ErrorType: 'NoMatchingCondition', NextAction: 'play-goodbye' },
+          ],
         },
       },
       {
