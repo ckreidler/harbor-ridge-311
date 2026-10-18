@@ -58,24 +58,25 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
     Metadata: {
       entryPointPosition: { x: 40, y: 40 },
       ActionMetadata: {
-        'enable-flow-logging': { position: { x: 290, y: 160 } },
-        'check-hours': { position: { x: 415, y: 160 } },
-        'transfer-after-hours': { position: { x: 415, y: 400 } },
-        'select-language': { position: { x: 540, y: 160 } },
-        'set-en-language': { position: { x: 790, y: 40 } },
-        'set-en-voice': { position: { x: 1040, y: 40 } },
-        'set-es-language': { position: { x: 790, y: 280 } },
-        'set-es-voice': { position: { x: 1040, y: 280 } },
-        'lookup-prompts': { position: { x: 1290, y: 160 } },
-        'play-greeting': { position: { x: 1540, y: 160 } },
-        'create-assistant-session': { position: { x: 1790, y: 160 } },
-        'check-question-language': { position: { x: 2040, y: 160 } },
-        'ask-en-question': { position: { x: 2290, y: 40 } },
-        'ask-es-question': { position: { x: 2290, y: 280 } },
-        'check-tool': { position: { x: 2540, y: 160 } },
-        'play-goodbye': { position: { x: 2790, y: 160 } },
-        disconnect: { position: { x: 3040, y: 160 } },
-        'play-fallback': { position: { x: 1540, y: 400 } },
+        'enable-flow-logging': { position: { x: 160, y: 200 } },
+        'select-language': { position: { x: 420, y: 200 } },
+        'set-en-language': { position: { x: 680, y: 40 } },
+        'set-en-voice': { position: { x: 940, y: 40 } },
+        'set-es-language': { position: { x: 680, y: 360 } },
+        'set-es-voice': { position: { x: 940, y: 360 } },
+        'lookup-prompts': { position: { x: 1200, y: 200 } },
+        'play-greeting': { position: { x: 1460, y: 200 } },
+        'play-fallback': { position: { x: 1460, y: 480 } },
+        'create-assistant-session': { position: { x: 1720, y: 200 } },
+        'check-question-language': { position: { x: 1980, y: 200 } },
+        'ask-en-question': { position: { x: 2240, y: 40 } },
+        'ask-es-question': { position: { x: 2240, y: 360 } },
+        'check-tool': { position: { x: 2500, y: 200 } },
+        'play-goodbye': { position: { x: 2760, y: 40 } },
+        'check-hours': { position: { x: 2760, y: 360 } },
+        'play-agent-placeholder': { position: { x: 3020, y: 280 } },
+        'transfer-after-hours': { position: { x: 3020, y: 520 } },
+        disconnect: { position: { x: 3280, y: 200 } },
       },
     },
     Actions: [
@@ -86,40 +87,7 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
           FlowLoggingBehavior: 'Enabled',
         },
         Transitions: {
-          NextAction: 'check-hours',
-        },
-      },
-      {
-        Identifier: 'check-hours',
-        Type: 'CheckHoursOfOperation',
-        Parameters: {
-          HoursOfOperationId: props.hoursOfOperationArn,
-        },
-        Transitions: {
           NextAction: 'select-language',
-          Conditions: [
-            {
-              NextAction: 'select-language',
-              Condition: { Operator: 'Equals', Operands: ['True'] },
-            },
-            {
-              NextAction: 'transfer-after-hours',
-              Condition: { Operator: 'Equals', Operands: ['False'] },
-            },
-          ],
-          Errors: errorTo('transfer-after-hours'),
-        },
-      },
-      {
-        Identifier: 'transfer-after-hours',
-        Type: 'TransferToFlow',
-        Parameters: {
-          ContactFlowId: props.afterHoursFlowArn,
-        },
-        Transitions: {
-          NextAction: 'disconnect',
-          Errors: errorTo('disconnect'),
-          Conditions: [],
         },
       },
       {
@@ -284,9 +252,9 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
         Transitions: {
           NextAction: 'check-tool',
           Errors: [
-            { ErrorType: 'InputTimeLimitExceeded', NextAction: 'play-goodbye' },
-            { ErrorType: 'NoMatchingCondition', NextAction: 'play-goodbye' },
-            { ErrorType: 'NoMatchingError', NextAction: 'play-goodbye' },
+            { ErrorType: 'InputTimeLimitExceeded', NextAction: 'check-hours' },
+            { ErrorType: 'NoMatchingCondition', NextAction: 'check-hours' },
+            { ErrorType: 'NoMatchingError', NextAction: 'check-hours' },
           ],
           Conditions: [],
         },
@@ -306,9 +274,9 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
         Transitions: {
           NextAction: 'check-tool',
           Errors: [
-            { ErrorType: 'InputTimeLimitExceeded', NextAction: 'play-goodbye' },
-            { ErrorType: 'NoMatchingCondition', NextAction: 'play-goodbye' },
-            { ErrorType: 'NoMatchingError', NextAction: 'play-goodbye' },
+            { ErrorType: 'InputTimeLimitExceeded', NextAction: 'check-hours' },
+            { ErrorType: 'NoMatchingCondition', NextAction: 'check-hours' },
+            { ErrorType: 'NoMatchingError', NextAction: 'check-hours' },
           ],
           Conditions: [],
         },
@@ -326,10 +294,59 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
               NextAction: 'play-goodbye',
               Condition: { Operator: 'Equals', Operands: ['COMPLETE'] },
             },
+            {
+              NextAction: 'check-hours',
+              Condition: { Operator: 'Equals', Operands: ['ESCALATION'] },
+            },
           ],
           Errors: [
-            { ErrorType: 'NoMatchingCondition', NextAction: 'play-goodbye' },
+            { ErrorType: 'NoMatchingCondition', NextAction: 'check-hours' },
           ],
+        },
+      },
+      {
+        Identifier: 'check-hours',
+        Type: 'CheckHoursOfOperation',
+        Parameters: {
+          HoursOfOperationId: props.hoursOfOperationArn,
+        },
+        Transitions: {
+          NextAction: 'play-agent-placeholder',
+          Conditions: [
+            {
+              NextAction: 'play-agent-placeholder',
+              Condition: { Operator: 'Equals', Operands: ['True'] },
+            },
+            {
+              NextAction: 'transfer-after-hours',
+              Condition: { Operator: 'Equals', Operands: ['False'] },
+            },
+          ],
+          Errors: errorTo('transfer-after-hours'),
+        },
+      },
+      {
+        Identifier: 'play-agent-placeholder',
+        Type: 'MessageParticipant',
+        Parameters: {
+          Text: 'This is where we would escalate to an agent.',
+        },
+        Transitions: {
+          NextAction: 'disconnect',
+          Errors: errorTo('disconnect'),
+          Conditions: [],
+        },
+      },
+      {
+        Identifier: 'transfer-after-hours',
+        Type: 'TransferToFlow',
+        Parameters: {
+          ContactFlowId: props.afterHoursFlowArn,
+        },
+        Transitions: {
+          NextAction: 'disconnect',
+          Errors: errorTo('disconnect'),
+          Conditions: [],
         },
       },
       {

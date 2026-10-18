@@ -31,6 +31,7 @@ interface FlowAction {
 }
 
 interface FlowContent {
+  StartAction: string;
   Metadata: { ActionMetadata: Record<string, { position: { x: number; y: number } }> };
   Actions: FlowAction[];
 }
@@ -335,18 +336,20 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
     '¿En qué puedo ayudarle? Puede preguntar sobre la recolección de basura, los baches, los permisos de estacionamiento o el horario. Diga agente si prefiere hablar con una persona.',
   ]));
   expect(lexBots.every((action) => action.Parameters?.LexV2Bot?.AliasArn === 'token')).toBe(true);
+  expect(JSON.stringify(lexBots)).toContain('"x-amz-lex:q-in-connect:session-arn":"$.Wisdom.SessionArn"');
   expect(lexBots.every((action) => action.Transitions?.NextAction === 'check-tool')).toBe(true);
-  expect(lexBots[0]?.Transitions?.Errors?.map((error) => error.NextAction)).toEqual([
-    'play-goodbye',
-    'play-goodbye',
-    'play-goodbye',
+  expect(lexBots.map((action) => action.Transitions?.Errors?.map((error) => error.NextAction))).toEqual([
+    ['check-hours', 'check-hours', 'check-hours'],
+    ['check-hours', 'check-hours', 'check-hours'],
   ]);
   expect(toolCheck?.Parameters?.ComparisonValue).toBe('$.Lex.SessionAttributes.Tool');
-  expect(toolCheck?.Transitions?.Conditions?.[0].Condition.Operands).toEqual(['COMPLETE']);
-  expect(toolCheck?.Transitions?.Conditions?.[0].NextAction).toBe('play-goodbye');
+  expect(toolCheck?.Transitions?.Conditions?.find((branch) => branch.Condition.Operands[0] === 'COMPLETE')?.NextAction)
+    .toBe('play-goodbye');
+  expect(toolCheck?.Transitions?.Conditions?.find((branch) => branch.Condition.Operands[0] === 'ESCALATION')?.NextAction)
+    .toBe('check-hours');
   expect(toolCheck?.Transitions?.Errors?.[0]).toEqual({
     ErrorType: 'NoMatchingCondition',
-    NextAction: 'play-goodbye',
+    NextAction: 'check-hours',
   });
   expect(content.Actions.find((action) => action.Identifier === 'play-greeting')?.Transitions?.NextAction)
     .toBe('create-assistant-session');
@@ -387,17 +390,28 @@ test('ConnectStack records an after-hours voicemail when the office is closed', 
   const main = flowDocument(contactFlow(template, 'HarborRidge311-Main').Properties.Content);
   const logging = main.Actions.find((action) => action.Identifier === 'enable-flow-logging');
   const hoursCheck = main.Actions.find((action) => action.Identifier === 'check-hours');
-  expect(logging?.Transitions?.NextAction).toBe('check-hours');
+  expect(main.StartAction).toBe('enable-flow-logging');
+  expect(logging?.Transitions?.NextAction).toBe('select-language');
+  const beforeLanguage: string[] = [];
+  let cursor: string | undefined = main.StartAction;
+  while (cursor && cursor !== 'select-language') {
+    beforeLanguage.push(cursor);
+    cursor = main.Actions.find((action) => action.Identifier === cursor)?.Transitions?.NextAction;
+  }
+  expect(beforeLanguage).toEqual(['enable-flow-logging']);
   expect(hoursCheck?.Type).toBe('CheckHoursOfOperation');
-  expect(hoursCheck?.Transitions?.NextAction).toBe('select-language');
   expect(hoursCheck?.Transitions?.Conditions?.find((branch) => branch.Condition.Operands[0] === 'True')?.NextAction)
-    .toBe('select-language');
+    .toBe('play-agent-placeholder');
   expect(hoursCheck?.Transitions?.Conditions?.find((branch) => branch.Condition.Operands[0] === 'False')?.NextAction)
     .toBe('transfer-after-hours');
   expect(hoursCheck?.Transitions?.Errors?.[0]).toEqual({
     ErrorType: 'NoMatchingError',
     NextAction: 'transfer-after-hours',
   });
+  const placeholder = main.Actions.find((action) => action.Identifier === 'play-agent-placeholder');
+  expect(placeholder?.Type).toBe('MessageParticipant');
+  expect(placeholder?.Parameters?.Text).toBe('This is where we would escalate to an agent.');
+  expect(placeholder?.Transitions?.NextAction).toBe('disconnect');
   expect(main.Actions.find((action) => action.Identifier === 'transfer-after-hours')?.Type).toBe('TransferToFlow');
   expect(main.Actions.find((action) => action.Identifier === 'select-language')?.Transitions?.NextAction)
     .toBe('set-en-language');
