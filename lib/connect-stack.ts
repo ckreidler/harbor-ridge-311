@@ -1,15 +1,12 @@
-import * as fs from 'node:fs';
-import * as path from 'node:path';
 import * as connect from 'aws-cdk-lib/aws-connect';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
 import * as cdk from 'aws-cdk-lib/core';
 import * as cr from 'aws-cdk-lib/custom-resources';
 import { Construct } from 'constructs';
+import { mainFlow } from './flows/main-flow';
 
 const SANDBOX_PARAMETER_PREFIX = '/connect/sandbox';
-
-const mainFlow = fs.readFileSync(path.join(__dirname, '../flows/harbor-ridge-311-main.json'), 'utf8');
 
 export class ConnectStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -36,7 +33,7 @@ export class ConnectStack extends cdk.Stack {
       instanceArn,
       name: 'HarborRidge311-Main',
       type: 'CONTACT_FLOW',
-      content: mainFlow,
+      content: JSON.stringify(mainFlow),
     });
 
     const associateCall: cr.AwsSdkCall = {
