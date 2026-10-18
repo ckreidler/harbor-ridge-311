@@ -261,11 +261,6 @@ export class ConnectStack extends cdk.Stack {
       assistantId,
       aiGuardrailId: guardrail.attrAiGuardrailId,
     });
-    const guardrailVersionId = cdk.Fn.join(':', [
-      guardrail.attrAiGuardrailId,
-      cdk.Token.asString(guardrailVersion.attrVersionNumber),
-    ]);
-
     const selfServiceAgent = new wisdom.CfnAIAgent(this, 'SelfServiceAgent', {
       assistantId,
       name: 'HarborRidge311-SelfService',
@@ -273,7 +268,7 @@ export class ConnectStack extends cdk.Stack {
       description: 'Answers Harbor Ridge city questions from the FAQ knowledge base.',
       configuration: {
         selfServiceAiAgentConfiguration: {
-          selfServiceAiGuardrailId: guardrailVersionId,
+          selfServiceAiGuardrailId: guardrailVersion.attrAiGuardrailVersionId,
         },
       },
     });
@@ -281,10 +276,6 @@ export class ConnectStack extends cdk.Stack {
       assistantId,
       aiAgentId: selfServiceAgent.attrAiAgentId,
     });
-    const selfServiceAgentVersionId = cdk.Fn.join(':', [
-      selfServiceAgent.attrAiAgentId,
-      cdk.Token.asString(selfServiceAgentVersion.attrVersionNumber),
-    ]);
 
     const setDefaultAgentCall: cr.AwsSdkCall = {
       service: 'QConnect',
@@ -293,10 +284,10 @@ export class ConnectStack extends cdk.Stack {
         assistantId,
         aiAgentType: 'SELF_SERVICE',
         configuration: {
-          aiAgentId: selfServiceAgentVersionId,
+          aiAgentId: selfServiceAgentVersion.attrAiAgentVersionId,
         },
       },
-      physicalResourceId: cr.PhysicalResourceId.of(selfServiceAgentVersionId),
+      physicalResourceId: cr.PhysicalResourceId.of(selfServiceAgentVersion.attrAiAgentVersionId),
     };
     const setDefaultAgent = new cr.AwsCustomResource(this, 'SetDefaultSelfServiceAgent', {
       installLatestAwsSdk: true,

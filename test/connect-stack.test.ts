@@ -157,6 +157,21 @@ function policyStatements(template: Template): PolicyStatement[] {
   return Object.values(policies).flatMap((policy) => policy.Properties.PolicyDocument.Statement);
 }
 
+function joinReferencesVersionNumber(value: unknown): boolean {
+  if (Array.isArray(value)) {
+    return value.some(joinReferencesVersionNumber);
+  }
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  const join = record['Fn::Join'];
+  if (join !== undefined && JSON.stringify(join).includes('VersionNumber')) {
+    return true;
+  }
+  return Object.values(record).some(joinReferencesVersionNumber);
+}
+
 function resourceValues(resource: unknown): string[] {
   const values = Array.isArray(resource) ? resource : [resource];
   return values.map((value) => (typeof value === 'string' ? value : JSON.stringify(value)));
@@ -217,7 +232,10 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
   });
   const agent = JSON.stringify(template.findResources('AWS::Wisdom::AIAgent'));
   expect(agent).toContain('SelfServiceAIGuardrailId');
+  expect(agent).toContain('AIGuardrailVersionId');
   expect(agent).not.toContain('AIPrompt');
+  expect(JSON.stringify(template.findResources('Custom::AWS'))).toContain('AIAgentVersionId');
+  expect(joinReferencesVersionNumber(template.toJSON())).toBe(false);
 
   const guardrail = JSON.stringify(template.findResources('AWS::Wisdom::AIGuardrail'));
   expect(guardrail).toContain('Off topic');
