@@ -29,11 +29,71 @@ export class ConnectStack extends cdk.Stack {
       `${SANDBOX_PARAMETER_PREFIX}/phone-number`,
     );
 
+    const prompts = new connect.CfnDataTable(this, 'Prompts', {
+      instanceArn,
+      name: 'HarborRidge311-Prompts',
+      status: 'PUBLISHED',
+      timeZone: 'America/New_York',
+      valueLockLevel: 'NONE',
+    });
+
+    const languageAttribute = new connect.CfnDataTableAttribute(this, 'LanguageAttribute', {
+      instanceArn,
+      dataTableArn: prompts.attrArn,
+      name: 'Language',
+      primary: true,
+      valueType: 'TEXT',
+    });
+    const greetingAttribute = new connect.CfnDataTableAttribute(this, 'GreetingAttribute', {
+      instanceArn,
+      dataTableArn: prompts.attrArn,
+      name: 'Greeting',
+      valueType: 'TEXT',
+    });
+    const goodbyeAttribute = new connect.CfnDataTableAttribute(this, 'GoodbyeAttribute', {
+      instanceArn,
+      dataTableArn: prompts.attrArn,
+      name: 'Goodbye',
+      valueType: 'TEXT',
+    });
+
+    for (const row of [
+      {
+        id: 'EnglishPrompt',
+        language: 'en-US',
+        greeting: 'Thank you for calling Harbor Ridge 3 1 1. This line is a demo.',
+        goodbye: 'Thank you for calling Harbor Ridge 3 1 1. Goodbye.',
+      },
+      {
+        id: 'SpanishPrompt',
+        language: 'es-US',
+        greeting: 'Gracias por llamar a Harbor Ridge tres uno uno. Esta línea es una demostración.',
+        goodbye: 'Gracias por llamar a Harbor Ridge tres uno uno. Adiós.',
+      },
+    ]) {
+      new connect.CfnDataTableRecord(this, row.id, {
+        instanceArn,
+        dataTableArn: prompts.attrArn,
+        dataTableRecord: {
+          primaryValues: [{
+            attributeId: languageAttribute.attrAttributeId,
+            attributeValue: row.language,
+          }],
+          values: [
+            { attributeId: greetingAttribute.attrAttributeId, attributeValue: row.greeting },
+            { attributeId: goodbyeAttribute.attrAttributeId, attributeValue: row.goodbye },
+          ],
+        },
+      });
+    }
+
     const flow = new connect.CfnContactFlow(this, 'MainFlow', {
       instanceArn,
       name: 'HarborRidge311-Main',
       type: 'CONTACT_FLOW',
-      content: JSON.stringify(mainFlow),
+      content: cdk.Fn.toJsonString(mainFlow({
+        dataTableId: cdk.Fn.select(3, cdk.Fn.split('/', prompts.attrArn)),
+      })),
     });
 
     const associateCall: cr.AwsSdkCall = {

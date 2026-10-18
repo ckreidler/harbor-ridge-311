@@ -6,7 +6,7 @@ The `cdk.json` file tells the CDK Toolkit how to execute your app.
 
 ## ConnectStack
 
-`ConnectStack` reads the sandbox instance published by [connect-platform](https://github.com/ckreidler/connect-platform) and adds a contact flow named `HarborRidge311-Main`. The flow sets the Joanna voice, plays a short demo greeting, and hangs up. An error branch hangs up as well. A custom resource calls `AssociatePhoneNumberContactFlow` so the sandbox number uses this flow, and `DisassociatePhoneNumberContactFlow` when the stack is deleted.
+`ConnectStack` reads the sandbox instance published by [connect-platform](https://github.com/ckreidler/connect-platform) and adds a contact flow named `HarborRidge311-Main` plus a data table named `HarborRidge311-Prompts`. The flow asks the caller to press 1 for English or 2 for Spanish, sets the voice and contact language, then plays the greeting and goodbye for that language from the table. A lookup error plays a hardcoded English fallback and hangs up. A custom resource calls `AssociatePhoneNumberContactFlow` so the sandbox number uses this flow, and `DisassociatePhoneNumberContactFlow` when the stack is deleted.
 
 SSM parameters, read at deploy time with `StringParameter.valueForStringParameter`:
 
