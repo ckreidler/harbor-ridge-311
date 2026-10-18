@@ -487,6 +487,7 @@ export class ConnectStack extends cdk.Stack {
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: false },
+      timeToLiveAttribute: 'expiresAt',
     });
 
     const voicemailLogGroup = new logs.LogGroup(this, 'VoicemailIndexerLogs', {

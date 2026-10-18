@@ -32,9 +32,16 @@ interface ConnectModule {
   DescribeContactCommand: new (input: { InstanceId?: string; ContactId?: string }) => unknown;
 }
 
-function loadSdk<T>(specifier: string): Promise<T> {
-  return import(specifier) as Promise<T>;
-}
+export const VOICEMAIL_RETENTION_DAYS = 30;
+
+export const voicemailRuntime = {
+  loadSdk<T>(specifier: string): Promise<T> {
+    return import(specifier) as Promise<T>;
+  },
+  now(): number {
+    return Date.now();
+  },
+};
 
 const CONTACT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -98,6 +105,11 @@ export function wavDurationSeconds(header: Uint8Array, objectSize: number): numb
   return (objectSize - dataOffset) / byteRate;
 }
 
+export function voicemailExpiresAt(eventTime: string | undefined, nowMs: number): number {
+  const createdMs = epochMs(eventTime) ?? nowMs;
+  return Math.floor(createdMs / 1000) + VOICEMAIL_RETENTION_DAYS * 24 * 60 * 60;
+}
+
 export async function handler(event: ObjectCreatedEvent): Promise<void> {
   const encodedKey = event.detail?.object?.key;
   if (!encodedKey) {
@@ -118,7 +130,7 @@ export async function handler(event: ObjectCreatedEvent): Promise<void> {
   const bucket = required('BUCKET_NAME');
   const tableName = required('TABLE_NAME');
   const key = decodeObjectKey(encodedKey);
-  const connectSdk = await loadSdk<ConnectModule>('@aws-sdk/client-connect');
+  const connectSdk = await voicemailRuntime.loadSdk<ConnectModule>('@aws-sdk/client-connect');
   const connect = new connectSdk.ConnectClient({});
   const attributes = await connect.send(new connectSdk.GetContactAttributesCommand({
     InstanceId: instanceId,
@@ -143,7 +155,7 @@ export async function handler(event: ObjectCreatedEvent): Promise<void> {
       : event.time ?? new Date().toISOString();
   const durationSeconds = wavDurationSeconds(await readWavHeader(bucket, key), objectSize);
 
-  const dynamo = await loadSdk<DynamoModule>('@aws-sdk/client-dynamodb');
+  const dynamo = await voicemailRuntime.loadSdk<DynamoModule>('@aws-sdk/client-dynamodb');
   await new dynamo.DynamoDBClient({}).send(new dynamo.PutItemCommand({
     TableName: tableName,
     Item: {
@@ -152,12 +164,13 @@ export async function handler(event: ObjectCreatedEvent): Promise<void> {
       timestamp: { S: timestamp },
       s3Key: { S: key },
       durationSeconds: { N: String(durationSeconds) },
+      expiresAt: { N: String(voicemailExpiresAt(event.time, voicemailRuntime.now())) },
     },
   }));
 }
 
 async function readWavHeader(bucket: string, key: string): Promise<Uint8Array> {
-  const s3 = await loadSdk<S3Module>('@aws-sdk/client-s3');
+  const s3 = await voicemailRuntime.loadSdk<S3Module>('@aws-sdk/client-s3');
   const response = await new s3.S3Client({}).send(new s3.GetObjectCommand({
     Bucket: bucket,
     Key: key,

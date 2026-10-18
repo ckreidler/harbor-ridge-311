@@ -426,6 +426,7 @@ test('ConnectStack records an after-hours voicemail when the office is closed', 
     KeySchema: [{ AttributeName: 'contactId', KeyType: 'HASH' }],
     AttributeDefinitions: [{ AttributeName: 'contactId', AttributeType: 'S' }],
     PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: false },
+    TimeToLiveSpecification: { AttributeName: 'expiresAt', Enabled: true },
   });
   template.hasResource('AWS::DynamoDB::Table', {
     DeletionPolicy: 'Delete',
