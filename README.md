@@ -41,3 +41,4 @@ Outputs are the contact flow ARN, the phone number, the sandbox assistant ARN, a
 * `npx cdk deploy ConnectStack`  deploy the contact flow
 * `npx cdk diff`    compare deployed stack with current state
 * `npx cdk synth`   emits the synthesized CloudFormation template
+* `pip install -r requirements-dev.txt && npm run cfn-lint`  lint the synthesized ConnectStack template

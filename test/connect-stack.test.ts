@@ -538,11 +538,13 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
     const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action];
     expect(actions).toEqual(['wisdom:GetAIAgent']);
     const resources = resourceValues(statement.Resource);
-    expect(resources).toHaveLength(4);
+    expect(resources).toHaveLength(8);
     expect(resources.filter((resource) => resource.includes('OrchestrationAgentVersion'))).toHaveLength(2);
     expect(resources.filter((resource) => resource.includes('AIAgentArn') && !resource.includes('OrchestrationAgentVersion'))).toHaveLength(2);
+    expect(resources.filter((resource) => resource.includes('AIAgentId') && resource.includes(':*'))).toHaveLength(2);
+    expect(resources.filter((resource) => resource.includes('AIAgentId') && !resource.includes(':*'))).toHaveLength(2);
     expect(resources.some((resource) => resource.includes('VersionNumber') || resource.includes('Fn::Sub'))).toBe(false);
-    expect(resources.some((resource) => resource.includes('*'))).toBe(false);
+    expect(resources.every((resource) => !resource.includes('*') || resource.includes(':*'))).toBe(true);
   }
   const defaultAgentStatements = policyStatements(template).filter((statement) => {
     const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action];

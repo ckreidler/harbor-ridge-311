@@ -439,6 +439,20 @@ export class ConnectStack extends cdk.Stack {
     const chatAgentArn = chatOrchestrator.agent.attrAiAgentArn;
     const chatAgentVersionArn = chatOrchestrator.agentVersion.attrAiAgentArn;
     const agentArns = [voiceAgentArn, voiceAgentVersionArn, chatAgentArn, chatAgentVersionArn];
+    const unqualifiedAgentArn = (agentId: string): string => this.formatArn({
+      service: 'wisdom',
+      resource: 'ai-agent',
+      resourceName: cdk.Fn.join('/', [assistantId, agentId]),
+    });
+    const voiceUnqualifiedArn = unqualifiedAgentArn(voiceOrchestrator.agent.attrAiAgentId);
+    const chatUnqualifiedArn = unqualifiedAgentArn(chatOrchestrator.agent.attrAiAgentId);
+    const getAiAgentResources = [
+      ...agentArns,
+      voiceUnqualifiedArn,
+      cdk.Fn.join('', [voiceUnqualifiedArn, ':*']),
+      chatUnqualifiedArn,
+      cdk.Fn.join('', [chatUnqualifiedArn, ':*']),
+    ];
     const securityProfileResources = [
       instanceArn,
       orchestratorSecurityProfile.attrSecurityProfileArn,
@@ -483,7 +497,7 @@ export class ConnectStack extends cdk.Stack {
           }),
           new iam.PolicyStatement({
             actions: ['wisdom:GetAIAgent'],
-            resources: agentArns,
+            resources: getAiAgentResources,
           }),
         ]),
       });
