@@ -38,6 +38,7 @@ export interface MainFlowProps {
   dataTableId: string;
   wisdomAssistantArn: string;
   lexBotAliasArn: string;
+  orchestratorLambdaArn: string;
   hoursOfOperationArn: string;
   afterHoursFlowArn: string;
 }
@@ -45,7 +46,6 @@ export interface MainFlowProps {
 const ENGLISH_GREETING = 'Thank you for calling Harbor Ridge 3 1 1. This line is a demo.';
 const ENGLISH_GOODBYE = 'Thank you for calling Harbor Ridge 3 1 1. Goodbye.';
 const ENGLISH_QUESTION = 'What can I help you with? You can ask about trash pickup, potholes, parking permits, or office hours. Say agent if you would rather talk to a person.';
-const SPANISH_QUESTION = '¿En qué puedo ayudarle? Puede preguntar sobre la recolección de basura, los baches, los permisos de estacionamiento o el horario. Diga agente si prefiere hablar con una persona.';
 
 function errorTo(nextAction: string): FlowError[] {
   return [{ ErrorType: 'NoMatchingError', NextAction: nextAction }];
@@ -59,20 +59,17 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
       entryPointPosition: { x: 40, y: 40 },
       ActionMetadata: {
         'enable-flow-logging': { position: { x: 160, y: 200 } },
-        'select-language': { position: { x: 420, y: 200 } },
-        'set-en-language': { position: { x: 680, y: 40 } },
-        'set-en-voice': { position: { x: 940, y: 40 } },
-        'set-es-language': { position: { x: 680, y: 360 } },
-        'set-es-voice': { position: { x: 940, y: 360 } },
-        'lookup-prompts': { position: { x: 1200, y: 200 } },
-        'play-greeting': { position: { x: 1460, y: 200 } },
-        'play-fallback': { position: { x: 1460, y: 480 } },
-        'create-assistant-session': { position: { x: 1720, y: 200 } },
-        'check-question-language': { position: { x: 1980, y: 200 } },
-        'ask-en-question': { position: { x: 2240, y: 40 } },
-        'ask-es-question': { position: { x: 2240, y: 360 } },
-        'check-tool': { position: { x: 2500, y: 200 } },
-        'play-goodbye': { position: { x: 2760, y: 40 } },
+        'set-en-language': { position: { x: 420, y: 200 } },
+        'set-en-voice': { position: { x: 680, y: 200 } },
+        'lookup-prompts': { position: { x: 940, y: 200 } },
+        'play-greeting': { position: { x: 1200, y: 200 } },
+        'play-fallback': { position: { x: 1200, y: 480 } },
+        'create-assistant-session': { position: { x: 1460, y: 200 } },
+        'select-orchestrator': { position: { x: 1720, y: 200 } },
+        'ask-en-question': { position: { x: 1980, y: 200 } },
+        'check-tool': { position: { x: 2240, y: 200 } },
+        'play-goodbye': { position: { x: 2500, y: 40 } },
+        'set-escalation': { position: { x: 2500, y: 280 } },
         'check-hours': { position: { x: 2760, y: 360 } },
         'play-agent-placeholder': { position: { x: 3020, y: 280 } },
         'transfer-after-hours': { position: { x: 3020, y: 520 } },
@@ -87,34 +84,7 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
           FlowLoggingBehavior: 'Enabled',
         },
         Transitions: {
-          NextAction: 'select-language',
-        },
-      },
-      {
-        Identifier: 'select-language',
-        Type: 'GetParticipantInput',
-        Parameters: {
-          Text: 'For English, press 1. Para español, oprima 2.',
-          StoreInput: 'False',
-          InputTimeLimitSeconds: '5',
-        },
-        Transitions: {
           NextAction: 'set-en-language',
-          Conditions: [
-            {
-              NextAction: 'set-en-language',
-              Condition: { Operator: 'Equals', Operands: ['1'] },
-            },
-            {
-              NextAction: 'set-es-language',
-              Condition: { Operator: 'Equals', Operands: ['2'] },
-            },
-          ],
-          Errors: [
-            { ErrorType: 'InputTimeLimitExceeded', NextAction: 'set-en-language' },
-            { ErrorType: 'NoMatchingCondition', NextAction: 'set-en-language' },
-            { ErrorType: 'NoMatchingError', NextAction: 'set-en-language' },
-          ],
         },
       },
       {
@@ -135,32 +105,6 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
         Type: 'UpdateContactTextToSpeechVoice',
         Parameters: {
           TextToSpeechVoice: 'Joanna',
-          TextToSpeechEngine: 'Neural',
-        },
-        Transitions: {
-          NextAction: 'lookup-prompts',
-          Errors: errorTo('lookup-prompts'),
-          Conditions: [],
-        },
-      },
-      {
-        Identifier: 'set-es-language',
-        Type: 'UpdateContactData',
-        Parameters: {
-          LanguageCode: 'es-US',
-          TargetContact: 'Current',
-        },
-        Transitions: {
-          NextAction: 'set-es-voice',
-          Errors: errorTo('set-es-voice'),
-          Conditions: [],
-        },
-      },
-      {
-        Identifier: 'set-es-voice',
-        Type: 'UpdateContactTextToSpeechVoice',
-        Parameters: {
-          TextToSpeechVoice: 'Lupe',
           TextToSpeechEngine: 'Neural',
         },
         Transitions: {
@@ -209,32 +153,25 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
           WisdomAssistantArn: props.wisdomAssistantArn,
         },
         Transitions: {
-          NextAction: 'check-question-language',
+          NextAction: 'select-orchestrator',
           Errors: errorTo('play-goodbye'),
           Conditions: [],
         },
       },
       {
-        Identifier: 'check-question-language',
-        Type: 'Compare',
+        Identifier: 'select-orchestrator',
+        Type: 'InvokeLambdaFunction',
         Parameters: {
-          ComparisonValue: '$.LanguageCode',
+          LambdaFunctionARN: props.orchestratorLambdaArn,
+          InvocationTimeLimitSeconds: '8',
+          LambdaInvocationAttributes: {
+            sessionArn: '$.Wisdom.SessionArn',
+          },
         },
         Transitions: {
           NextAction: 'ask-en-question',
-          Conditions: [
-            {
-              NextAction: 'ask-en-question',
-              Condition: { Operator: 'Equals', Operands: ['en-US'] },
-            },
-            {
-              NextAction: 'ask-es-question',
-              Condition: { Operator: 'Equals', Operands: ['es-US'] },
-            },
-          ],
-          Errors: [
-            { ErrorType: 'NoMatchingCondition', NextAction: 'ask-en-question' },
-          ],
+          Errors: errorTo('ask-en-question'),
+          Conditions: [],
         },
       },
       {
@@ -242,28 +179,6 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
         Type: 'ConnectParticipantWithLexBot',
         Parameters: {
           Text: ENGLISH_QUESTION,
-          LexV2Bot: {
-            AliasArn: props.lexBotAliasArn,
-          },
-          LexSessionAttributes: {
-            'x-amz-lex:q-in-connect:session-arn': '$.Wisdom.SessionArn',
-          },
-        },
-        Transitions: {
-          NextAction: 'check-hours',
-          Errors: [
-            { ErrorType: 'InputTimeLimitExceeded', NextAction: 'check-hours' },
-            { ErrorType: 'NoMatchingCondition', NextAction: 'check-tool' },
-            { ErrorType: 'NoMatchingError', NextAction: 'check-hours' },
-          ],
-          Conditions: [],
-        },
-      },
-      {
-        Identifier: 'ask-es-question',
-        Type: 'ConnectParticipantWithLexBot',
-        Parameters: {
-          Text: SPANISH_QUESTION,
           LexV2Bot: {
             AliasArn: props.lexBotAliasArn,
           },
@@ -292,16 +207,34 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
           Conditions: [
             {
               NextAction: 'play-goodbye',
-              Condition: { Operator: 'Equals', Operands: ['COMPLETE'] },
+              Condition: { Operator: 'Equals', Operands: ['Complete'] },
             },
             {
-              NextAction: 'check-hours',
-              Condition: { Operator: 'Equals', Operands: ['ESCALATION'] },
+              NextAction: 'set-escalation',
+              Condition: { Operator: 'Equals', Operands: ['Escalate'] },
             },
           ],
           Errors: [
             { ErrorType: 'NoMatchingCondition', NextAction: 'check-hours' },
           ],
+        },
+      },
+      {
+        Identifier: 'set-escalation',
+        Type: 'UpdateContactAttributes',
+        Parameters: {
+          Attributes: {
+            escalationReason: '$.Lex.SessionAttributes.escalationReason',
+            escalationSummary: '$.Lex.SessionAttributes.escalationSummary',
+            customerIntent: '$.Lex.SessionAttributes.customerIntent',
+            sentiment: '$.Lex.SessionAttributes.sentiment',
+          },
+          TargetContact: 'Current',
+        },
+        Transitions: {
+          NextAction: 'check-hours',
+          Errors: errorTo('check-hours'),
+          Conditions: [],
         },
       },
       {

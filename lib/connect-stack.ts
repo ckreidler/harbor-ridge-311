@@ -22,6 +22,8 @@ import * as cr from 'aws-cdk-lib/custom-resources';
 import { Construct } from 'constructs';
 import { afterHoursFlow } from './flows/after-hours-flow';
 import { mainFlow } from './flows/main-flow';
+import { ORCHESTRATION_MODEL_ID, orchestrationPrompt } from './orchestration-prompt';
+import { SELF_SERVICE_USE_CASE } from './select-orchestrator';
 
 const SANDBOX_PARAMETER_PREFIX = '/connect/sandbox';
 export const RECORDINGS_PREFIX = 'call-recordings/';
@@ -67,6 +69,104 @@ const BLOCKED_PII = [
 
 function enabledLocale(localeId: string) {
   return { localeId, botAliasLocaleSetting: { enabled: true } };
+}
+
+function templateOverride(
+  jsonPath: string,
+  value: string,
+  type: 'STRING' | 'JSON_STRING' = 'STRING',
+): wisdom.CfnAIAgent.ToolOverrideInputValueProperty {
+  return {
+    jsonPath,
+    value: { constant: { type, value } },
+  };
+}
+
+function orchestrationTools(): wisdom.CfnAIAgent.ToolConfigurationProperty[] {
+  return [
+    {
+      toolName: 'Complete',
+      toolType: 'RETURN_TO_CONTROL',
+      description: 'End the conversation after the city question is answered.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          reason: {
+            type: 'string',
+            description: 'Why the conversation is complete',
+          },
+        },
+        required: ['reason'],
+      },
+      instruction: {
+        instruction: 'Call Complete when the person has the city information they asked for and does not want anything else.',
+      },
+    },
+    {
+      toolName: 'Escalate',
+      toolType: 'RETURN_TO_CONTROL',
+      description: 'Hand the Harbor Ridge 311 conversation to a person.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          customerIntent: {
+            type: 'string',
+            description: 'A brief phrase describing what the customer wants to accomplish',
+          },
+          sentiment: {
+            type: 'string',
+            description: 'Customer emotional state during the conversation',
+            enum: ['positive', 'neutral', 'frustrated'],
+          },
+          escalationSummary: {
+            type: 'string',
+            description: 'Summary for the person who picks up, including what was asked, what was tried, and why escalation is needed, under 500 characters',
+          },
+          escalationReason: {
+            type: 'string',
+            description: 'Category for the escalation reason',
+            enum: [
+              'complex_request',
+              'technical_issue',
+              'customer_frustration',
+              'policy_exception',
+              'out_of_scope',
+              'other',
+            ],
+          },
+        },
+        required: [
+          'escalationReason',
+          'escalationSummary',
+          'customerIntent',
+          'sentiment',
+        ],
+      },
+      instruction: {
+        instruction: 'Escalate to a person when the caller asks for a person, agent, representative, or transfer. Also escalate for a policy exception, an inspection, or another request a city employee has to handle, when the question is outside Harbor Ridge city services, when the FAQ does not contain an answer, when the caller is frustrated, or when the request needs payment, an account change, or personal information.',
+        examples: [
+          'I can connect you with a person. I will share what we talked about so you do not have to start over.',
+        ],
+      },
+    },
+    {
+      toolName: 'Retrieve',
+      toolType: 'MODEL_CONTEXT_PROTOCOL',
+      toolId: 'aws_service__qconnect_Retrieve',
+      description: 'Search the Harbor Ridge 311 FAQ knowledge base.',
+      instruction: {
+        instruction: 'Call Retrieve before answering a question about Harbor Ridge city services. Answer only from the retrieved FAQ text.',
+      },
+      overrideInputValues: [
+        templateOverride('$.assistantId', '{{$.assistantId}}'),
+        templateOverride(
+          '$.retrievalConfiguration.knowledgeSource.assistantAssociationIds',
+          '{{$.knowledgeBaseAssistantAssociationIds}}',
+          'JSON_STRING',
+        ),
+      ],
+    },
+  ];
 }
 
 function cityQuestionLocale(localeId: string, voiceId: string, assistantArn: string): lex.CfnBot.BotLocaleProperty {
@@ -162,12 +262,6 @@ export class ConnectStack extends cdk.Stack {
         language: 'en-US',
         greeting: 'Thank you for calling Harbor Ridge 3 1 1. This line is a demo.',
         goodbye: 'Thank you for calling Harbor Ridge 3 1 1. Goodbye.',
-      },
-      {
-        id: 'SpanishPrompt',
-        language: 'es-US',
-        greeting: 'Gracias por llamar a Harbor Ridge tres uno uno. Esta línea es una demostración.',
-        goodbye: 'Gracias por llamar a Harbor Ridge tres uno uno. Adiós.',
       },
     ].map((row) => new connect.CfnDataTableRecord(this, row.id, {
       instanceArn,
@@ -290,21 +384,127 @@ export class ConnectStack extends cdk.Stack {
       aiGuardrailId: guardrail.attrAiGuardrailId,
       modifiedTimeSeconds: cdk.Token.asNumber(guardrail.attrModifiedTimeSeconds),
     });
-    const selfServiceAgent = new wisdom.CfnAIAgent(this, 'SelfServiceAgent', {
-      assistantId,
-      name: 'HarborRidge311-SelfService',
-      type: 'SELF_SERVICE',
-      description: 'Answers Harbor Ridge city questions from the FAQ knowledge base.',
-      configuration: {
-        selfServiceAiAgentConfiguration: {
-          selfServiceAiGuardrailId: guardrailVersion.attrAiGuardrailVersionId,
+    const orchestrationAgents = (['Voice', 'Chat'] as const).map((channel) => {
+      const prompt = new wisdom.CfnAIPrompt(this, `${channel}OrchestrationPrompt`, {
+        assistantId,
+        name: `HarborRidge311-${channel}Orchestration`,
+        description: `Harbor Ridge 311 ${channel.toLowerCase()} self-service orchestration prompt.`,
+        type: 'ORCHESTRATION',
+        apiFormat: 'MESSAGES',
+        modelId: ORCHESTRATION_MODEL_ID,
+        templateType: 'TEXT',
+        templateConfiguration: {
+          textFullAiPromptEditTemplateConfiguration: {
+            text: orchestrationPrompt(channel === 'Voice' ? 'voice' : 'chat'),
+          },
         },
-      },
+      });
+      const promptVersion = new wisdom.CfnAIPromptVersion(this, `${channel}OrchestrationPromptVersion`, {
+        assistantId,
+        aiPromptId: prompt.attrAiPromptId,
+        modifiedTimeSeconds: cdk.Token.asNumber(prompt.attrModifiedTimeSeconds),
+      });
+      const agent = new wisdom.CfnAIAgent(this, `${channel}OrchestrationAgent`, {
+        assistantId,
+        name: `HarborRidge311-${channel}Orchestration`,
+        type: 'ORCHESTRATION',
+        description: `Harbor Ridge 311 ${channel.toLowerCase()} self-service orchestration agent.`,
+        configuration: {
+          orchestrationAiAgentConfiguration: {
+            connectInstanceArn: instanceArn,
+            locale: 'en_US',
+            orchestrationAiGuardrailId: guardrailVersion.attrAiGuardrailVersionId,
+            orchestrationAiPromptId: promptVersion.attrAiPromptVersionId,
+            toolConfigurations: orchestrationTools(),
+          },
+        },
+      });
+      const agentVersion = new wisdom.CfnAIAgentVersion(this, `${channel}OrchestrationAgentVersion`, {
+        assistantId,
+        aiAgentId: agent.attrAiAgentId,
+        modifiedTimeSeconds: cdk.Token.asNumber(agent.attrModifiedTimeSeconds),
+      });
+      return { agent, agentVersion };
     });
-    const selfServiceAgentVersion = new wisdom.CfnAIAgentVersion(this, 'SelfServiceAgentVersion', {
-      assistantId,
-      aiAgentId: selfServiceAgent.attrAiAgentId,
-      modifiedTimeSeconds: cdk.Token.asNumber(selfServiceAgent.attrModifiedTimeSeconds),
+    const [voiceOrchestrator, chatOrchestrator] = orchestrationAgents;
+    if (!voiceOrchestrator || !chatOrchestrator) {
+      throw new Error('missing orchestration agents');
+    }
+
+    const orchestratorSecurityProfile = new connect.CfnSecurityProfile(this, 'OrchestratorSecurityProfile', {
+      instanceArn,
+      securityProfileName: 'HarborRidge311-Orchestration',
+      description: 'Lets the Harbor Ridge 311 orchestration agents retrieve FAQ answers.',
+      permissions: ['Wisdom.View'],
+    });
+    const securityProfileId = cdk.Fn.select(3, cdk.Fn.split('/', orchestratorSecurityProfile.attrSecurityProfileArn));
+    const voiceAgentArn = voiceOrchestrator.agent.attrAiAgentArn;
+    const voiceAgentVersionArn = voiceOrchestrator.agentVersion.attrAiAgentArn;
+    const chatAgentArn = chatOrchestrator.agent.attrAiAgentArn;
+    const chatAgentVersionArn = chatOrchestrator.agentVersion.attrAiAgentArn;
+    const agentArns = [voiceAgentArn, voiceAgentVersionArn, chatAgentArn, chatAgentVersionArn];
+    const unqualifiedAgentArn = (agentId: string): string => this.formatArn({
+      service: 'wisdom',
+      resource: 'ai-agent',
+      resourceName: cdk.Fn.join('/', [assistantId, agentId]),
+    });
+    const voiceUnqualifiedArn = unqualifiedAgentArn(voiceOrchestrator.agent.attrAiAgentId);
+    const chatUnqualifiedArn = unqualifiedAgentArn(chatOrchestrator.agent.attrAiAgentId);
+    const getAiAgentResources = [
+      ...agentArns,
+      voiceUnqualifiedArn,
+      cdk.Fn.join('', [voiceUnqualifiedArn, ':*']),
+      chatUnqualifiedArn,
+      cdk.Fn.join('', [chatUnqualifiedArn, ':*']),
+    ];
+    const securityProfileResources = [
+      instanceArn,
+      orchestratorSecurityProfile.attrSecurityProfileArn,
+      ...agentArns,
+    ];
+    const securityProfileAssociations = [
+      { id: 'AssociateVoiceAgentProfile', entityArn: voiceAgentArn },
+      { id: 'AssociateVoiceAgentVersionProfile', entityArn: voiceAgentVersionArn },
+      { id: 'AssociateChatAgentProfile', entityArn: chatAgentArn },
+      { id: 'AssociateChatAgentVersionProfile', entityArn: chatAgentVersionArn },
+    ].map(({ id, entityArn }) => {
+      const parameters = {
+        InstanceId: instanceId,
+        EntityArn: entityArn,
+        EntityType: 'AI_AGENT',
+        SecurityProfiles: [{ Id: securityProfileId }],
+      };
+      const associateCall: cr.AwsSdkCall = {
+        service: 'connect',
+        action: 'AssociateSecurityProfiles',
+        parameters,
+        physicalResourceId: cr.PhysicalResourceId.of(`HarborRidge311-${id}`),
+      };
+      return new cr.AwsCustomResource(this, id, {
+        installLatestAwsSdk: true,
+        onCreate: associateCall,
+        onUpdate: associateCall,
+        onDelete: {
+          service: 'connect',
+          action: 'DisassociateSecurityProfiles',
+          parameters,
+          ignoreErrorCodesMatching: 'ResourceNotFoundException|InvalidParameterException',
+        },
+        policy: cr.AwsCustomResourcePolicy.fromStatements([
+          new iam.PolicyStatement({
+            actions: ['connect:AssociateSecurityProfiles'],
+            resources: securityProfileResources,
+          }),
+          new iam.PolicyStatement({
+            actions: ['connect:DisassociateSecurityProfiles'],
+            resources: securityProfileResources,
+          }),
+          new iam.PolicyStatement({
+            actions: ['wisdom:GetAIAgent'],
+            resources: getAiAgentResources,
+          }),
+        ]),
+      });
     });
 
     const setDefaultAgentCall: cr.AwsSdkCall = {
@@ -312,14 +512,15 @@ export class ConnectStack extends cdk.Stack {
       action: 'UpdateAssistantAIAgent',
       parameters: {
         assistantId,
-        aiAgentType: 'SELF_SERVICE',
+        aiAgentType: 'ORCHESTRATION',
         configuration: {
-          aiAgentId: selfServiceAgentVersion.attrAiAgentVersionId,
+          aiAgentId: voiceOrchestrator.agentVersion.attrAiAgentVersionId,
         },
+        orchestratorUseCase: SELF_SERVICE_USE_CASE,
       },
-      physicalResourceId: cr.PhysicalResourceId.of('HarborRidge311-SelfServiceDefault'),
+      physicalResourceId: cr.PhysicalResourceId.of('HarborRidge311-SelfServiceOrchestrator'),
     };
-    const setDefaultAgent = new cr.AwsCustomResource(this, 'SetDefaultSelfServiceAgent', {
+    const setDefaultAgent = new cr.AwsCustomResource(this, 'SetDefaultOrchestrationAgent', {
       installLatestAwsSdk: true,
       onCreate: setDefaultAgentCall,
       onUpdate: setDefaultAgentCall,
@@ -328,8 +529,10 @@ export class ConnectStack extends cdk.Stack {
         action: 'RemoveAssistantAIAgent',
         parameters: {
           assistantId,
-          aiAgentType: 'SELF_SERVICE',
+          aiAgentType: 'ORCHESTRATION',
+          orchestratorUseCase: SELF_SERVICE_USE_CASE,
         },
+        ignoreErrorCodesMatching: 'ResourceNotFoundException',
       },
       policy: cr.AwsCustomResourcePolicy.fromStatements([
         new iam.PolicyStatement({
@@ -338,6 +541,7 @@ export class ConnectStack extends cdk.Stack {
         }),
       ]),
     });
+    setDefaultAgent.node.addDependency(...securityProfileAssociations);
 
     const botRole = new iam.Role(this, 'CityQuestionsBotRole', {
       assumedBy: new iam.ServicePrincipal('lexv2.amazonaws.com'),
@@ -381,25 +585,23 @@ export class ConnectStack extends cdk.Stack {
       idleSessionTtlInSeconds: 600,
       autoBuildBotLocales: true,
       testBotAliasSettings: {
-        botAliasLocaleSettings: [enabledLocale('en_US'), enabledLocale('es_US')],
+        botAliasLocaleSettings: [enabledLocale('en_US')],
       },
       botLocales: [
         cityQuestionLocale('en_US', 'Joanna', assistantArn),
-        cityQuestionLocale('es_US', 'Lupe', assistantArn),
       ],
     });
     const botVersion = new lex.CfnBotVersion(this, 'CityQuestionsBotVersion', {
       botId: bot.attrId,
       botVersionLocaleSpecification: [
         { localeId: 'en_US', botVersionLocaleDetails: { sourceBotVersion: 'DRAFT' } },
-        { localeId: 'es_US', botVersionLocaleDetails: { sourceBotVersion: 'DRAFT' } },
       ],
     });
     const botAlias = new lex.CfnBotAlias(this, 'CityQuestionsBotAlias', {
       botId: bot.attrId,
       botAliasName: 'live',
       botVersion: botVersion.attrBotVersion,
-      botAliasLocaleSettings: [enabledLocale('en_US'), enabledLocale('es_US')],
+      botAliasLocaleSettings: [enabledLocale('en_US')],
       conversationLogSettings: {
         textLogSettings: [{
           enabled: true,
@@ -417,6 +619,55 @@ export class ConnectStack extends cdk.Stack {
       instanceId: instanceArn,
       integrationType: 'LEX_BOT',
       integrationArn: botAlias.attrArn,
+    });
+
+    const orchestratorLogGroup = new logs.LogGroup(this, 'SelectOrchestratorLogs', {
+      logGroupName: '/aws/lambda/HarborRidge311-SelectOrchestrator',
+      retention: logs.RetentionDays.ONE_WEEK,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+    const orchestratorRole = new iam.Role(this, 'SelectOrchestratorRole', {
+      assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
+    });
+    orchestratorRole.addToPolicy(new iam.PolicyStatement({
+      actions: ['logs:CreateLogStream', 'logs:PutLogEvents'],
+      resources: [cdk.Fn.join('', [orchestratorLogGroup.logGroupArn, ':*'])],
+    }));
+    const selectOrchestrator = new nodejs.NodejsFunction(this, 'SelectOrchestrator', {
+      runtime: lambda.Runtime.NODEJS_22_X,
+      entry: path.join(__dirname, 'select-orchestrator.ts'),
+      handler: 'handler',
+      timeout: cdk.Duration.seconds(8),
+      functionName: 'HarborRidge311-SelectOrchestrator',
+      logGroup: orchestratorLogGroup,
+      role: orchestratorRole,
+      bundling: {
+        externalModules: [],
+      },
+      environment: {
+        ASSISTANT_ID: assistantId,
+        VOICE_AGENT_VERSION_ID: voiceOrchestrator.agentVersion.attrAiAgentVersionId,
+        CHAT_AGENT_VERSION_ID: chatOrchestrator.agentVersion.attrAiAgentVersionId,
+      },
+    });
+    selectOrchestrator.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['wisdom:UpdateSession'],
+      resources: [
+        this.formatArn({
+          service: 'wisdom',
+          resource: 'session',
+          resourceName: cdk.Fn.join('/', [assistantId, '*']),
+        }),
+      ],
+    }));
+    selectOrchestrator.addPermission('AllowConnectInvoke', {
+      principal: new iam.ServicePrincipal('connect.amazonaws.com'),
+      sourceArn: instanceArn,
+    });
+    const orchestratorAssociation = new connect.CfnIntegrationAssociation(this, 'OrchestratorLambdaIntegration', {
+      instanceId: instanceArn,
+      integrationType: 'LAMBDA_FUNCTION',
+      integrationArn: selectOrchestrator.functionArn,
     });
 
     const hoursOfOperation = new connect.CfnHoursOfOperation(this, 'Hours', {
@@ -445,11 +696,12 @@ export class ConnectStack extends cdk.Stack {
         dataTableId: cdk.Fn.select(3, cdk.Fn.split('/', prompts.attrArn)),
         wisdomAssistantArn: assistantArn,
         lexBotAliasArn: botAlias.attrArn,
+        orchestratorLambdaArn: selectOrchestrator.functionArn,
         hoursOfOperationArn: hoursOfOperation.attrHoursOfOperationArn,
         afterHoursFlowArn: afterHours.attrContactFlowArn,
       })),
     });
-    flow.node.addDependency(...promptRows, lexAssociation);
+    flow.node.addDependency(...promptRows, lexAssociation, orchestratorAssociation);
     setDefaultAgent.node.addDependency(botAlias, flow);
 
     const associateCall: cr.AwsSdkCall = {
