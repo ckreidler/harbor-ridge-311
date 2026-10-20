@@ -71,10 +71,14 @@ function enabledLocale(localeId: string) {
   return { localeId, botAliasLocaleSetting: { enabled: true } };
 }
 
-function templateOverride(jsonPath: string, value: string): wisdom.CfnAIAgent.ToolOverrideInputValueProperty {
+function templateOverride(
+  jsonPath: string,
+  value: string,
+  type: 'STRING' | 'JSON_STRING' = 'STRING',
+): wisdom.CfnAIAgent.ToolOverrideInputValueProperty {
   return {
     jsonPath,
-    value: { constant: { type: 'STRING', value } },
+    value: { constant: { type, value } },
   };
 }
 
@@ -116,8 +120,7 @@ function orchestrationTools(): wisdom.CfnAIAgent.ToolConfigurationProperty[] {
           },
           escalationSummary: {
             type: 'string',
-            description: 'Summary for the person who picks up, including what was asked, what was tried, and why escalation is needed',
-            maxLength: 500,
+            description: 'Summary for the person who picks up, including what was asked, what was tried, and why escalation is needed, under 500 characters',
           },
           escalationReason: {
             type: 'string',
@@ -159,6 +162,7 @@ function orchestrationTools(): wisdom.CfnAIAgent.ToolConfigurationProperty[] {
         templateOverride(
           '$.retrievalConfiguration.knowledgeSource.assistantAssociationIds',
           '{{$.knowledgeBaseAssistantAssociationIds}}',
+          'JSON_STRING',
         ),
       ],
     },

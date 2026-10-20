@@ -189,6 +189,41 @@ function resourceValues(resource: unknown): string[] {
   return values.map((value) => (typeof value === 'string' ? value : JSON.stringify(value)));
 }
 
+const NUMERIC_JSON_SCHEMA_KEYWORDS = new Set([
+  'multipleOf',
+  'maximum',
+  'exclusiveMaximum',
+  'minimum',
+  'exclusiveMinimum',
+  'maxLength',
+  'minLength',
+  'maxItems',
+  'minItems',
+  'maxProperties',
+  'minProperties',
+  'maxContains',
+  'minContains',
+]);
+
+function numericJsonSchemaKeywords(value: unknown, found: string[] = []): string[] {
+  if (!value || typeof value !== 'object') {
+    return found;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      numericJsonSchemaKeywords(item, found);
+    }
+    return found;
+  }
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    if (NUMERIC_JSON_SCHEMA_KEYWORDS.has(key)) {
+      found.push(key);
+    }
+    numericJsonSchemaKeywords(child, found);
+  }
+  return found;
+}
+
 test('ConnectStack answers city questions from Q in Connect and falls back to goodbye', () => {
   const app = new cdk.App();
   const stack = new ConnectStack(app, 'ConnectStack');
@@ -284,6 +319,9 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
   expect(agent).toContain('aws_service__qconnect_Retrieve');
   expect(agent).toContain('{{$.assistantId}}');
   expect(agent).toContain('{{$.knowledgeBaseAssistantAssociationIds}}');
+  expect(agent).toContain('"JsonPath":"$.assistantId"');
+  expect(agent).toContain('"Type":"JSON_STRING","Value":"{{$.knowledgeBaseAssistantAssociationIds}}"');
+  expect(agent).toContain('"Type":"STRING","Value":"{{$.assistantId}}"');
   expect(agent).toContain('escalationReason');
   expect(agent).toContain('complex_request');
   expect(agent).toContain('customer_frustration');
@@ -336,6 +374,7 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
     for (const tool of configuration?.ToolConfigurations ?? []) {
       expect(Object.keys(tool).every((key) => toolProperties.has(key))).toBe(true);
       expect(['MODEL_CONTEXT_PROTOCOL', 'RETURN_TO_CONTROL', 'CONSTANT']).toContain(tool.ToolType);
+      expect(numericJsonSchemaKeywords(tool.InputSchema)).toEqual([]);
     }
   }
   for (const resource of Object.values(template.findResources('AWS::Wisdom::AIPrompt')) as Array<{
