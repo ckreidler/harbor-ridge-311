@@ -337,11 +337,16 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
   ]));
   expect(lexBots.every((action) => action.Parameters?.LexV2Bot?.AliasArn === 'token')).toBe(true);
   expect(JSON.stringify(lexBots)).toContain('"x-amz-lex:q-in-connect:session-arn":"$.Wisdom.SessionArn"');
-  expect(lexBots.every((action) => action.Transitions?.NextAction === 'check-tool')).toBe(true);
-  expect(lexBots.map((action) => action.Transitions?.Errors?.map((error) => error.NextAction))).toEqual([
-    ['check-hours', 'check-hours', 'check-hours'],
-    ['check-hours', 'check-hours', 'check-hours'],
-  ]);
+  expect(lexBots).toHaveLength(2);
+  for (const action of lexBots) {
+    const branch = (errorType: string) =>
+      action.Transitions?.Errors?.find((error) => error.ErrorType === errorType)?.NextAction;
+    expect(action.Transitions?.Conditions).toEqual([]);
+    expect(branch('NoMatchingCondition')).toBe('check-tool');
+    expect(branch('InputTimeLimitExceeded')).toBe('check-hours');
+    expect(branch('NoMatchingError')).toBe('check-hours');
+    expect(action.Transitions?.NextAction).toBe('check-hours');
+  }
   expect(toolCheck?.Parameters?.ComparisonValue).toBe('$.Lex.SessionAttributes.Tool');
   expect(toolCheck?.Transitions?.Conditions?.find((branch) => branch.Condition.Operands[0] === 'COMPLETE')?.NextAction)
     .toBe('play-goodbye');
