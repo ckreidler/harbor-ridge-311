@@ -626,7 +626,24 @@ test('ConnectStack adds an active Harbor Ridge 311 case template', () => {
   });
   expect(optionPolicies).toHaveLength(1);
   expect([optionPolicies[0]?.Action].flat()).toEqual(['cases:BatchPutFieldOptions']);
-  expect(resourceValues(optionPolicies[0]?.Resource).some((resource) => resource === '*')).toBe(false);
+  expect(optionPolicies[0]?.Resource).toEqual([
+    {
+      'Fn::Join': [
+        '',
+        [
+          'arn:',
+          { Ref: 'AWS::Partition' },
+          ':cases:',
+          { Ref: 'AWS::Region' },
+          ':',
+          { Ref: 'AWS::AccountId' },
+          ':domain/',
+          { Ref: casesDomainParameter?.[0] },
+        ],
+      ],
+    },
+    { 'Fn::GetAtt': [categoryId, 'FieldArn'] },
+  ]);
 });
 
 test('ConnectStack hours can be overridden', () => {

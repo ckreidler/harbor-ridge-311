@@ -628,7 +628,14 @@ export class ConnectStack extends cdk.Stack {
       policy: cr.AwsCustomResourcePolicy.fromStatements([
         new iam.PolicyStatement({
           actions: ['cases:BatchPutFieldOptions'],
-          resources: [requestCategory.attrFieldArn],
+          resources: [
+            this.formatArn({
+              service: 'cases',
+              resource: 'domain',
+              resourceName: casesDomainId,
+            }),
+            requestCategory.attrFieldArn,
+          ],
         }),
       ]),
     });
