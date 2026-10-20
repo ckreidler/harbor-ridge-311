@@ -32,6 +32,16 @@ npx cdk deploy ConnectStack
 
 Outputs are the contact flow ARN, the phone number, the sandbox assistant ARN, and the Lex bot alias ARN.
 
+## Touchpoint
+
+`TouchpointStack` adds chat and a browser voice call to the static site. Both enter `HarborRidge311-Main`. Chat calls `StartChatContact`, so Connect sets the contact channel to `CHAT`. The browser call calls `StartWebRTCContact`, so the channel is `VOICE`. The flow's select-orchestrator Lambda reads that channel and picks the matching agent. The stack reads the sandbox instance the same way `ConnectStack` does, and reads the main flow id and ARN from `/connect/sandbox/harbor-ridge-311/main-contact-flow-id` and `main-contact-flow-arn`, which `ConnectStack` publishes. Deploy the site and the flow before the touchpoint stack, or deploy all three together:
+
+```bash
+npx cdk deploy WebsiteStack ConnectStack TouchpointStack
+```
+
+The page reads `config.js`, which the touchpoint stack writes into the site bucket at deploy time.
+
 ## Useful commands
 
 * `npm run build`   type-check the project
@@ -41,4 +51,4 @@ Outputs are the contact flow ARN, the phone number, the sandbox assistant ARN, a
 * `npx cdk deploy ConnectStack`  deploy the contact flow
 * `npx cdk diff`    compare deployed stack with current state
 * `npx cdk synth`   emits the synthesized CloudFormation template
-* `pip install -r requirements-dev.txt && npm run cfn-lint`  lint the synthesized ConnectStack template
+* `pip install -r requirements-dev.txt && npm run cfn-lint`  lint the synthesized WebsiteStack, ConnectStack, and TouchpointStack templates

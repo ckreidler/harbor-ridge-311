@@ -27,9 +27,21 @@
           <p>Use the number from your confirmation to see where a request stands.</p>
         </article>
       </section>
+      <section class="contact" aria-label="Contact 311">
+        <h2>Talk to 311</h2>
+        <p>Chat with the city line, or start a voice call in the browser.</p>
+        <div class="contact-actions">
+          <button type="button" id="start-chat" aria-pressed="false">Chat</button>
+          <button type="button" id="start-call" aria-pressed="false">Call</button>
+        </div>
+        <p id="contact-status" class="contact-status" hidden></p>
+      </section>
     </main>
     <footer>
       <p>Harbor Ridge Public Works. This is a static site served from Amazon S3 through Amazon CloudFront.</p>
     </footer>
+    <script src="touchpoint.umd.js"></script>
+    <script src="config.js"></script>
+    <script src="launch.js"></script>
   </body>
 </html>

@@ -72,6 +72,43 @@ a {
   color: var(--tide);
 }
 
+.contact {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-top: 4px solid var(--tide);
+  padding: 1rem 1.1rem 1.25rem;
+  margin-bottom: 1.5rem;
+}
+
+.contact-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.contact-actions button {
+  font: inherit;
+  color: #ffffff;
+  background: var(--tide);
+  border: 0;
+  padding: 0.55rem 1.1rem;
+  cursor: pointer;
+}
+
+.contact-actions button[aria-pressed="true"] {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.contact-actions button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.contact-status {
+  min-height: 1.2rem;
+}
+
 footer {
   padding: 1rem 0 2rem;
   color: #4d5e66;

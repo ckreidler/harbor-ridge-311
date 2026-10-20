@@ -25,7 +25,9 @@ import { mainFlow } from './flows/main-flow';
 import { ORCHESTRATION_MODEL_ID, orchestrationPrompt } from './orchestration-prompt';
 import { SELF_SERVICE_USE_CASE } from './select-orchestrator';
 
-const SANDBOX_PARAMETER_PREFIX = '/connect/sandbox';
+export const SANDBOX_PARAMETER_PREFIX = '/connect/sandbox';
+export const MAIN_CONTACT_FLOW_ID_PARAMETER = `${SANDBOX_PARAMETER_PREFIX}/harbor-ridge-311/main-contact-flow-id`;
+export const MAIN_CONTACT_FLOW_ARN_PARAMETER = `${SANDBOX_PARAMETER_PREFIX}/harbor-ridge-311/main-contact-flow-arn`;
 export const RECORDINGS_PREFIX = 'call-recordings/';
 export const VOICEMAIL_RECORDING_KEY_PATTERN = `${RECORDINGS_PREFIX}*ivr/*.wav`;
 
@@ -703,6 +705,15 @@ export class ConnectStack extends cdk.Stack {
     });
     flow.node.addDependency(...promptRows, lexAssociation, orchestratorAssociation);
     setDefaultAgent.node.addDependency(botAlias, flow);
+    const mainContactFlowId = cdk.Fn.select(3, cdk.Fn.split('/', flow.attrContactFlowArn));
+    new ssm.StringParameter(this, 'MainContactFlowIdParameter', {
+      parameterName: MAIN_CONTACT_FLOW_ID_PARAMETER,
+      stringValue: mainContactFlowId,
+    }).applyRemovalPolicy(cdk.RemovalPolicy.DESTROY);
+    new ssm.StringParameter(this, 'MainContactFlowArnParameter', {
+      parameterName: MAIN_CONTACT_FLOW_ARN_PARAMETER,
+      stringValue: flow.attrContactFlowArn,
+    }).applyRemovalPolicy(cdk.RemovalPolicy.DESTROY);
 
     const associateCall: cr.AwsSdkCall = {
       service: 'connect',
