@@ -347,12 +347,7 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
     expect(resource.Properties.Type).toBe('ORCHESTRATION');
   }
   expect(JSON.stringify(template.findResources('Custom::AWS'))).toContain('AIAgentVersionId');
-  expect(joinReferencesVersionNumber({
-    agents: template.findResources('AWS::Wisdom::AIAgent'),
-    prompts: template.findResources('AWS::Wisdom::AIPrompt'),
-    agentVersions: template.findResources('AWS::Wisdom::AIAgentVersion'),
-    promptVersions: template.findResources('AWS::Wisdom::AIPromptVersion'),
-  })).toBe(false);
+  expect(joinReferencesVersionNumber(template.toJSON())).toBe(false);
   expect(JSON.stringify(template.findResources('AWS::Wisdom::AIGuardrailVersion'))).toContain('ModifiedTimeSeconds');
   expect(JSON.stringify(template.findResources('AWS::Wisdom::AIAgentVersion'))).toContain('ModifiedTimeSeconds');
 
@@ -544,8 +539,9 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
     expect(actions).toEqual(['wisdom:GetAIAgent']);
     const resources = resourceValues(statement.Resource);
     expect(resources).toHaveLength(4);
-    expect(resources.filter((resource) => resource.includes('VersionNumber'))).toHaveLength(2);
-    expect(resources.filter((resource) => resource.includes('AIAgentArn') && !resource.includes('VersionNumber'))).toHaveLength(2);
+    expect(resources.filter((resource) => resource.includes('OrchestrationAgentVersion'))).toHaveLength(2);
+    expect(resources.filter((resource) => resource.includes('AIAgentArn') && !resource.includes('OrchestrationAgentVersion'))).toHaveLength(2);
+    expect(resources.some((resource) => resource.includes('VersionNumber') || resource.includes('Fn::Sub'))).toBe(false);
     expect(resources.some((resource) => resource.includes('*'))).toBe(false);
   }
   const defaultAgentStatements = policyStatements(template).filter((statement) => {

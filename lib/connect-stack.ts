@@ -434,14 +434,10 @@ export class ConnectStack extends cdk.Stack {
       permissions: ['Wisdom.View'],
     });
     const securityProfileId = cdk.Fn.select(3, cdk.Fn.split('/', orchestratorSecurityProfile.attrSecurityProfileArn));
-    const versionedAgentArn = (agentArn: string, version: wisdom.CfnAIAgentVersion) => cdk.Fn.sub('${AgentArn}:${VersionNumber}', {
-      AgentArn: agentArn,
-      VersionNumber: cdk.Token.asString(version.attrVersionNumber),
-    });
     const voiceAgentArn = voiceOrchestrator.agent.attrAiAgentArn;
-    const voiceAgentVersionArn = versionedAgentArn(voiceAgentArn, voiceOrchestrator.agentVersion);
+    const voiceAgentVersionArn = voiceOrchestrator.agentVersion.attrAiAgentArn;
     const chatAgentArn = chatOrchestrator.agent.attrAiAgentArn;
-    const chatAgentVersionArn = versionedAgentArn(chatAgentArn, chatOrchestrator.agentVersion);
+    const chatAgentVersionArn = chatOrchestrator.agentVersion.attrAiAgentArn;
     const agentArns = [voiceAgentArn, voiceAgentVersionArn, chatAgentArn, chatAgentVersionArn];
     const securityProfileResources = [
       instanceArn,

@@ -5,7 +5,8 @@
     "build": "tsc",
     "watch": "tsc -w",
     "test": "jest",
-    "cdk": "cdk"
+    "cdk": "cdk",
+    "cfn-lint": "cdk synth ConnectStack --quiet && cfn-lint --non-zero-exit-code error cdk.out/ConnectStack.template.json"
   },
   "devDependencies": {
     "@swc/core": "^1.15.0",
