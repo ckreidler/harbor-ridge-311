@@ -2,11 +2,12 @@
   "name": "harbor-ridge-311",
   "version": "0.1.0",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/build-site.mjs",
+    "build:site": "node scripts/build-site.mjs",
     "watch": "tsc -w",
     "test": "jest",
     "cdk": "cdk",
-    "cfn-lint": "cdk synth ConnectStack --quiet && cfn-lint --non-zero-exit-code error cdk.out/ConnectStack.template.json"
+    "cfn-lint": "cdk synth --quiet && cfn-lint --non-zero-exit-code error cdk.out/WebsiteStack.template.json cdk.out/ConnectStack.template.json cdk.out/TouchpointStack.template.json"
   },
   "devDependencies": {
     "@swc/core": "^1.15.0",
@@ -19,6 +20,7 @@
     "typescript": "~7.0.2"
   },
   "dependencies": {
+    "@amazon-connect-touchpoint/web": "1.0.5-3",
     "@aws-sdk/client-qconnect": "3.1153.0",
     "aws-cdk-lib": "^2.268.0",
     "constructs": "^10.5.0"

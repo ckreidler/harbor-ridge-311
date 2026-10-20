@@ -1,5 +1,7 @@
 *.js
 !jest.config.js
+!website/launch.js
+.website-build
 *.d.ts
 node_modules
 
