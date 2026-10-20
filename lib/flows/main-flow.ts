@@ -250,10 +250,10 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
           },
         },
         Transitions: {
-          NextAction: 'check-tool',
+          NextAction: 'check-hours',
           Errors: [
             { ErrorType: 'InputTimeLimitExceeded', NextAction: 'check-hours' },
-            { ErrorType: 'NoMatchingCondition', NextAction: 'check-hours' },
+            { ErrorType: 'NoMatchingCondition', NextAction: 'check-tool' },
             { ErrorType: 'NoMatchingError', NextAction: 'check-hours' },
           ],
           Conditions: [],
@@ -272,10 +272,10 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
           },
         },
         Transitions: {
-          NextAction: 'check-tool',
+          NextAction: 'check-hours',
           Errors: [
             { ErrorType: 'InputTimeLimitExceeded', NextAction: 'check-hours' },
-            { ErrorType: 'NoMatchingCondition', NextAction: 'check-hours' },
+            { ErrorType: 'NoMatchingCondition', NextAction: 'check-tool' },
             { ErrorType: 'NoMatchingError', NextAction: 'check-hours' },
           ],
           Conditions: [],
