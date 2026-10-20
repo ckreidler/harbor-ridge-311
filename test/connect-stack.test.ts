@@ -19,6 +19,7 @@ interface FlowAction {
     WisdomAssistantArn?: string;
     ComparisonValue?: string;
     LexV2Bot?: { AliasArn?: string };
+    InvocationTimeLimitSeconds?: string;
     Queries?: Array<{
       QueryName: string;
       Attributes: string[];
@@ -346,7 +347,12 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
     expect(resource.Properties.Type).toBe('ORCHESTRATION');
   }
   expect(JSON.stringify(template.findResources('Custom::AWS'))).toContain('AIAgentVersionId');
-  expect(joinReferencesVersionNumber(template.toJSON())).toBe(false);
+  expect(joinReferencesVersionNumber({
+    agents: template.findResources('AWS::Wisdom::AIAgent'),
+    prompts: template.findResources('AWS::Wisdom::AIPrompt'),
+    agentVersions: template.findResources('AWS::Wisdom::AIAgentVersion'),
+    promptVersions: template.findResources('AWS::Wisdom::AIPromptVersion'),
+  })).toBe(false);
   expect(JSON.stringify(template.findResources('AWS::Wisdom::AIGuardrailVersion'))).toContain('ModifiedTimeSeconds');
   expect(JSON.stringify(template.findResources('AWS::Wisdom::AIAgentVersion'))).toContain('ModifiedTimeSeconds');
 
@@ -491,6 +497,7 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
     expect(action.Transitions?.NextAction).toBe('check-hours');
   }
   expect(orchestrator?.Type).toBe('InvokeLambdaFunction');
+  expect(orchestrator?.Parameters?.InvocationTimeLimitSeconds).toBe('8');
   expect(orchestrator?.Transitions?.NextAction).toBe('ask-en-question');
   expect(orchestrator?.Transitions?.Errors).toEqual([
     { ErrorType: 'NoMatchingError', NextAction: 'ask-en-question' },
@@ -527,6 +534,31 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
     expect(JSON.stringify(statement.Resource)).not.toContain('*');
     expect(statement.Action).not.toContain('*');
   }
+  const getAgentStatements = policyStatements(template).filter((statement) => {
+    const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action];
+    return actions.includes('wisdom:GetAIAgent');
+  });
+  expect(getAgentStatements).toHaveLength(4);
+  for (const statement of getAgentStatements) {
+    const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action];
+    expect(actions).toEqual(['wisdom:GetAIAgent']);
+    const resources = resourceValues(statement.Resource);
+    expect(resources).toHaveLength(4);
+    expect(resources.filter((resource) => resource.includes('VersionNumber'))).toHaveLength(2);
+    expect(resources.filter((resource) => resource.includes('AIAgentArn') && !resource.includes('VersionNumber'))).toHaveLength(2);
+    expect(resources.some((resource) => resource.includes('*'))).toBe(false);
+  }
+  const defaultAgentStatements = policyStatements(template).filter((statement) => {
+    const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action];
+    return actions.includes('wisdom:UpdateAssistantAIAgent');
+  });
+  expect(defaultAgentStatements).toHaveLength(1);
+  expect([defaultAgentStatements[0]?.Action].flat()).not.toContain('wisdom:GetAIAgent');
+  const customResourceText = JSON.stringify(template.findResources('Custom::AWS'));
+  expect(customResourceText.match(/DisassociateSecurityProfiles/g)).toHaveLength(4);
+  expect(customResourceText.match(/ResourceNotFoundException\|InvalidParameterException/g)).toHaveLength(4);
+  expect(customResourceText).toContain('RemoveAssistantAIAgent');
+  expect(customResourceText).toContain('ignoreErrorCodesMatching\\":\\"ResourceNotFoundException\\"');
 
   const wisdomStatements = policyStatements(template).filter((statement) => {
     const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action];

@@ -163,6 +163,7 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
         Type: 'InvokeLambdaFunction',
         Parameters: {
           LambdaFunctionARN: props.orchestratorLambdaArn,
+          InvocationTimeLimitSeconds: '8',
           LambdaInvocationAttributes: {
             sessionArn: '$.Wisdom.SessionArn',
           },

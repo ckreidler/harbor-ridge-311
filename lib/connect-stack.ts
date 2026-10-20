@@ -434,19 +434,25 @@ export class ConnectStack extends cdk.Stack {
       permissions: ['Wisdom.View'],
     });
     const securityProfileId = cdk.Fn.select(3, cdk.Fn.split('/', orchestratorSecurityProfile.attrSecurityProfileArn));
+    const versionedAgentArn = (agentArn: string, version: wisdom.CfnAIAgentVersion) => cdk.Fn.sub('${AgentArn}:${VersionNumber}', {
+      AgentArn: agentArn,
+      VersionNumber: cdk.Token.asString(version.attrVersionNumber),
+    });
+    const voiceAgentArn = voiceOrchestrator.agent.attrAiAgentArn;
+    const voiceAgentVersionArn = versionedAgentArn(voiceAgentArn, voiceOrchestrator.agentVersion);
+    const chatAgentArn = chatOrchestrator.agent.attrAiAgentArn;
+    const chatAgentVersionArn = versionedAgentArn(chatAgentArn, chatOrchestrator.agentVersion);
+    const agentArns = [voiceAgentArn, voiceAgentVersionArn, chatAgentArn, chatAgentVersionArn];
     const securityProfileResources = [
       instanceArn,
       orchestratorSecurityProfile.attrSecurityProfileArn,
-      voiceOrchestrator.agent.attrAiAgentArn,
-      voiceOrchestrator.agentVersion.attrAiAgentArn,
-      chatOrchestrator.agent.attrAiAgentArn,
-      chatOrchestrator.agentVersion.attrAiAgentArn,
+      ...agentArns,
     ];
     const securityProfileAssociations = [
-      { id: 'AssociateVoiceAgentProfile', entityArn: voiceOrchestrator.agent.attrAiAgentArn },
-      { id: 'AssociateVoiceAgentVersionProfile', entityArn: voiceOrchestrator.agentVersion.attrAiAgentArn },
-      { id: 'AssociateChatAgentProfile', entityArn: chatOrchestrator.agent.attrAiAgentArn },
-      { id: 'AssociateChatAgentVersionProfile', entityArn: chatOrchestrator.agentVersion.attrAiAgentArn },
+      { id: 'AssociateVoiceAgentProfile', entityArn: voiceAgentArn },
+      { id: 'AssociateVoiceAgentVersionProfile', entityArn: voiceAgentVersionArn },
+      { id: 'AssociateChatAgentProfile', entityArn: chatAgentArn },
+      { id: 'AssociateChatAgentVersionProfile', entityArn: chatAgentVersionArn },
     ].map(({ id, entityArn }) => {
       const parameters = {
         InstanceId: instanceId,
@@ -468,7 +474,7 @@ export class ConnectStack extends cdk.Stack {
           service: 'connect',
           action: 'DisassociateSecurityProfiles',
           parameters,
-          ignoreErrorCodesMatching: 'ResourceNotFoundException',
+          ignoreErrorCodesMatching: 'ResourceNotFoundException|InvalidParameterException',
         },
         policy: cr.AwsCustomResourcePolicy.fromStatements([
           new iam.PolicyStatement({
@@ -478,6 +484,10 @@ export class ConnectStack extends cdk.Stack {
           new iam.PolicyStatement({
             actions: ['connect:DisassociateSecurityProfiles'],
             resources: securityProfileResources,
+          }),
+          new iam.PolicyStatement({
+            actions: ['wisdom:GetAIAgent'],
+            resources: agentArns,
           }),
         ]),
       });
@@ -508,6 +518,7 @@ export class ConnectStack extends cdk.Stack {
           aiAgentType: 'ORCHESTRATION',
           orchestratorUseCase: SELF_SERVICE_USE_CASE,
         },
+        ignoreErrorCodesMatching: 'ResourceNotFoundException',
       },
       policy: cr.AwsCustomResourcePolicy.fromStatements([
         new iam.PolicyStatement({
