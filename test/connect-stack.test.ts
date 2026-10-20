@@ -63,14 +63,14 @@ function contactFlow(template: Template, name: string) {
   };
 }
 
-test('ConnectStack selects a language, looks up prompts, and associates the sandbox number', () => {
+test('ConnectStack looks up the English prompts and associates the sandbox number', () => {
   const app = new cdk.App();
   const template = Template.fromStack(new ConnectStack(app, 'ConnectStack'));
 
   template.resourceCountIs('AWS::Connect::ContactFlow', 2);
   template.resourceCountIs('AWS::Connect::DataTable', 1);
   template.resourceCountIs('AWS::Connect::DataTableAttribute', 3);
-  template.resourceCountIs('AWS::Connect::DataTableRecord', 2);
+  template.resourceCountIs('AWS::Connect::DataTableRecord', 1);
 
   template.hasResourceProperties('AWS::Connect::DataTable', {
     Name: 'HarborRidge311-Prompts',
@@ -86,30 +86,18 @@ test('ConnectStack selects a language, looks up prompts, and associates the sand
   expect(records).toContain('en-US');
   expect(records).toContain('Thank you for calling Harbor Ridge 3 1 1. This line is a demo.');
   expect(records).toContain('Thank you for calling Harbor Ridge 3 1 1. Goodbye.');
-  expect(records).toContain('es-US');
-  expect(records).toContain('Gracias por llamar a Harbor Ridge tres uno uno. Esta línea es una demostración.');
-  expect(records).toContain('Gracias por llamar a Harbor Ridge tres uno uno. Adiós.');
+  expect(records).not.toContain('es-US');
+  expect(records).not.toContain('Gracias');
   expect(records).not.toContain('Question');
 
   const flow = contactFlow(template, 'HarborRidge311-Main');
   expect(flow.Properties.Type).toBe('CONTACT_FLOW');
 
   const content = flowDocument(flow.Properties.Content);
-  const menu = content.Actions.find((action) => action.Type === 'GetParticipantInput');
-  const digits = menu?.Transitions?.Conditions?.map((branch) => branch.Condition.Operands[0]);
-  expect(menu?.Parameters?.Text).toBe('For English, press 1. Para español, oprima 2.');
-  expect(menu?.Parameters?.InputTimeLimitSeconds).toBe('5');
-  expect(digits).toEqual(['1', '2']);
-  expect(menu?.Transitions?.Conditions?.find((branch) => branch.Condition.Operands[0] === '1')?.NextAction)
-    .toBe('set-en-language');
-  expect(menu?.Transitions?.Conditions?.find((branch) => branch.Condition.Operands[0] === '2')?.NextAction)
-    .toBe('set-es-language');
-  expect(menu?.Transitions?.Errors?.map((error) => error.NextAction)).toEqual([
-    'set-en-language',
-    'set-en-language',
-    'set-en-language',
-  ]);
-  expect(content.Actions.some((action) => action.Type === 'UpdateContactAttributes')).toBe(false);
+  expect(content.Actions.some((action) => action.Type === 'GetParticipantInput')).toBe(false);
+  expect(content.Actions.some((action) => action.Identifier === 'set-es-language')).toBe(false);
+  expect(content.Actions.some((action) => action.Identifier === 'set-es-voice')).toBe(false);
+  expect(JSON.stringify(content)).not.toContain('español');
   expect(JSON.stringify(content)).not.toContain('$.Attributes.language');
 
   expect(JSON.stringify(flow.Properties.Content)).toContain('Prompts');
@@ -127,13 +115,13 @@ test('ConnectStack selects a language, looks up prompts, and associates the sand
   expect(goodbye?.Parameters?.Text).toBe('$.DataTables.Prompts.Goodbye');
   expect(content.Actions.find((action) => action.Identifier === 'set-en-voice')?.Parameters?.TextToSpeechVoice)
     .toBe('Joanna');
-  expect(content.Actions.find((action) => action.Identifier === 'set-es-voice')?.Parameters?.TextToSpeechVoice)
-    .toBe('Lupe');
+  expect(content.Actions.find((action) => action.Identifier === 'enable-flow-logging')?.Transitions?.NextAction)
+    .toBe('set-en-language');
   expect(content.Actions.map((action) => action.Identifier).every((id) => content.Metadata.ActionMetadata[id]?.position))
     .toBe(true);
   const recordIds = Object.keys(template.findResources('AWS::Connect::DataTableRecord'));
   const dependsOn = [flow.DependsOn].flat();
-  expect(dependsOn).toEqual(expect.arrayContaining(recordIds));
+  expect(dependsOn).toEqual(expect.arrayContaining([...recordIds, 'LexBotIntegration', 'OrchestratorLambdaIntegration']));
 
   const customResources = template.findResources('Custom::AWS');
   expect(JSON.stringify(customResources)).toContain('AssociatePhoneNumberContactFlow');
@@ -198,14 +186,16 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
   template.resourceCountIs('AWS::Wisdom::AssistantAssociation', 1);
   template.resourceCountIs('AWS::Wisdom::AIGuardrail', 1);
   template.resourceCountIs('AWS::Wisdom::AIGuardrailVersion', 1);
-  template.resourceCountIs('AWS::Wisdom::AIAgent', 1);
-  template.resourceCountIs('AWS::Wisdom::AIAgentVersion', 1);
-  template.resourceCountIs('AWS::Wisdom::AIPrompt', 0);
+  template.resourceCountIs('AWS::Wisdom::AIAgent', 2);
+  template.resourceCountIs('AWS::Wisdom::AIAgentVersion', 2);
+  template.resourceCountIs('AWS::Wisdom::AIPrompt', 2);
+  template.resourceCountIs('AWS::Wisdom::AIPromptVersion', 2);
+  template.resourceCountIs('AWS::Connect::SecurityProfile', 1);
   template.resourceCountIs('AWS::Lex::Bot', 1);
   template.resourceCountIs('AWS::Lex::BotVersion', 1);
   template.resourceCountIs('AWS::Lex::BotAlias', 1);
-  template.resourceCountIs('AWS::Connect::IntegrationAssociation', 2);
-  template.resourceCountIs('Custom::AWS', 3);
+  template.resourceCountIs('AWS::Connect::IntegrationAssociation', 3);
+  template.resourceCountIs('Custom::AWS', 7);
 
   template.hasResourceProperties('AWS::S3::Bucket', {
     PublicAccessBlockConfiguration: {
@@ -236,13 +226,110 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
     AssociationType: 'KNOWLEDGE_BASE',
   });
   template.hasResourceProperties('AWS::Wisdom::AIAgent', {
-    Name: 'HarborRidge311-SelfService',
-    Type: 'SELF_SERVICE',
+    Name: 'HarborRidge311-VoiceOrchestration',
+    Type: 'ORCHESTRATION',
+  });
+  template.hasResourceProperties('AWS::Wisdom::AIAgent', {
+    Name: 'HarborRidge311-ChatOrchestration',
+    Type: 'ORCHESTRATION',
+  });
+  template.hasResourceProperties('AWS::Wisdom::AIPrompt', {
+    Name: 'HarborRidge311-VoiceOrchestration',
+    Type: 'ORCHESTRATION',
+    ApiFormat: 'MESSAGES',
+    TemplateType: 'TEXT',
+    ModelId: 'us.anthropic.claude-haiku-4-5-20251001-v1:0',
+  });
+  template.hasResourceProperties('AWS::Wisdom::AIPrompt', {
+    Name: 'HarborRidge311-ChatOrchestration',
+    Type: 'ORCHESTRATION',
+    ApiFormat: 'MESSAGES',
+    TemplateType: 'TEXT',
+    ModelId: 'us.anthropic.claude-haiku-4-5-20251001-v1:0',
+  });
+  template.hasResourceProperties('AWS::Connect::SecurityProfile', {
+    SecurityProfileName: 'HarborRidge311-Orchestration',
+    Permissions: ['Wisdom.View'],
   });
   const agent = JSON.stringify(template.findResources('AWS::Wisdom::AIAgent'));
-  expect(agent).toContain('SelfServiceAIGuardrailId');
+  expect(agent).toContain('OrchestrationAIGuardrailId');
+  expect(agent).toContain('OrchestrationAIPromptId');
   expect(agent).toContain('AIGuardrailVersionId');
-  expect(agent).not.toContain('AIPrompt');
+  expect(agent).toContain('AIPromptVersionId');
+  expect(agent).toContain('"Locale":"en_US"');
+  expect(agent).toContain('ConnectInstanceArn');
+  expect(agent).not.toContain('SELF_SERVICE');
+  expect(agent).not.toContain('SelfServiceAIGuardrailId');
+  expect(agent).toContain('"ToolName":"Complete"');
+  expect(agent).toContain('"ToolName":"Escalate"');
+  expect(agent).toContain('"ToolName":"Retrieve"');
+  expect(agent).toContain('"ToolType":"RETURN_TO_CONTROL"');
+  expect(agent).toContain('"ToolType":"MODEL_CONTEXT_PROTOCOL"');
+  expect(agent).toContain('aws_service__qconnect_Retrieve');
+  expect(agent).toContain('{{$.assistantId}}');
+  expect(agent).toContain('{{$.knowledgeBaseAssistantAssociationIds}}');
+  expect(agent).toContain('escalationReason');
+  expect(agent).toContain('complex_request');
+  expect(agent).toContain('customer_frustration');
+  expect(agent).toContain('policy_exception');
+  expect(agent).toContain('out_of_scope');
+  const prompts = JSON.stringify(template.findResources('AWS::Wisdom::AIPrompt'));
+  for (const variable of [
+    '<message>',
+    '<thinking>',
+    '{{$.toolConfigurationList}}',
+    '{{$.conversationHistory}}',
+    '{{$.locale}}',
+    '{{$.contactId}}',
+    '{{$.instanceId}}',
+    '{{$.sessionId}}',
+    '{{$.assistantId}}',
+    '{{$.dateTime}}',
+  ]) {
+    expect(prompts).toContain(variable);
+  }
+  expect(prompts).toContain('spoken aloud');
+  expect(prompts).toContain('Do not use markdown');
+  expect(prompts).toContain('simple lists');
+  expect(prompts).not.toContain('es_US');
+  const agentProperties = new Set([
+    'AssistantId', 'Configuration', 'Description', 'Name', 'Tags', 'Type',
+  ]);
+  const orchestrationProperties = new Set([
+    'ConnectInstanceArn', 'Locale', 'OrchestrationAIGuardrailId', 'OrchestrationAIPromptId', 'ToolConfigurations',
+  ]);
+  const toolProperties = new Set([
+    'Annotations', 'Description', 'InputSchema', 'Instruction', 'OutputFilters', 'OutputSchema',
+    'OverrideInputValues', 'Title', 'ToolId', 'ToolName', 'ToolType', 'UserInteractionConfiguration',
+  ]);
+  const promptProperties = new Set([
+    'ApiFormat', 'AssistantId', 'Description', 'ModelId', 'Name', 'Tags',
+    'TemplateConfiguration', 'TemplateType', 'Type',
+  ]);
+  for (const resource of Object.values(template.findResources('AWS::Wisdom::AIAgent')) as Array<{
+    Properties: Record<string, unknown> & {
+      Configuration?: { OrchestrationAIAgentConfiguration?: Record<string, unknown> & {
+        ToolConfigurations?: Array<Record<string, unknown>>;
+      } };
+    };
+  }>) {
+    expect(Object.keys(resource.Properties).every((key) => agentProperties.has(key))).toBe(true);
+    const configuration = resource.Properties.Configuration?.OrchestrationAIAgentConfiguration;
+    expect(configuration).toBeDefined();
+    expect(Object.keys(configuration ?? {}).every((key) => orchestrationProperties.has(key))).toBe(true);
+    for (const tool of configuration?.ToolConfigurations ?? []) {
+      expect(Object.keys(tool).every((key) => toolProperties.has(key))).toBe(true);
+      expect(['MODEL_CONTEXT_PROTOCOL', 'RETURN_TO_CONTROL', 'CONSTANT']).toContain(tool.ToolType);
+    }
+  }
+  for (const resource of Object.values(template.findResources('AWS::Wisdom::AIPrompt')) as Array<{
+    Properties: Record<string, unknown>;
+  }>) {
+    expect(Object.keys(resource.Properties).every((key) => promptProperties.has(key))).toBe(true);
+    expect(resource.Properties.ApiFormat).toBe('MESSAGES');
+    expect(resource.Properties.TemplateType).toBe('TEXT');
+    expect(resource.Properties.Type).toBe('ORCHESTRATION');
+  }
   expect(JSON.stringify(template.findResources('Custom::AWS'))).toContain('AIAgentVersionId');
   expect(joinReferencesVersionNumber(template.toJSON())).toBe(false);
   expect(JSON.stringify(template.findResources('AWS::Wisdom::AIGuardrailVersion'))).toContain('ModifiedTimeSeconds');
@@ -275,7 +362,7 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
   const integrationTypes = Object.values(integrations).map((resource) => (
     resource as { Properties: { IntegrationType: string } }
   ).Properties.IntegrationType);
-  expect(integrationTypes.sort()).toEqual(['LEX_BOT', 'WISDOM_KNOWLEDGE_BASE']);
+  expect(integrationTypes.sort()).toEqual(['LAMBDA_FUNCTION', 'LEX_BOT', 'WISDOM_KNOWLEDGE_BASE']);
 
   const parameterDefaults = Object.values(template.toJSON().Parameters as Record<string, { Default?: string }>)
     .map((parameter) => parameter.Default);
@@ -288,14 +375,12 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
     BotAliasName: 'live',
     BotAliasLocaleSettings: [
       { LocaleId: 'en_US', BotAliasLocaleSetting: { Enabled: true } },
-      { LocaleId: 'es_US', BotAliasLocaleSetting: { Enabled: true } },
     ],
   });
   template.hasResourceProperties('AWS::Lex::Bot', {
     TestBotAliasSettings: {
       BotAliasLocaleSettings: [
         { LocaleId: 'en_US', BotAliasLocaleSetting: { Enabled: true } },
-        { LocaleId: 'es_US', BotAliasLocaleSetting: { Enabled: true } },
       ],
     },
   });
@@ -305,39 +390,52 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
   expect(bot).not.toContain('AMAZON.QinConnectIntent');
   expect(bot).toContain('AMAZON.FallbackIntent');
   expect(bot).toContain('en_US');
-  expect(bot).toContain('es_US');
+  expect(bot).not.toContain('es_US');
   expect(bot).not.toContain('AMAZON.QnAIntent');
 
   const customResources = JSON.stringify(template.findResources('Custom::AWS'));
   expect(customResources).toContain('UpdateAssistantAIAgent');
   expect(customResources).toContain('RemoveAssistantAIAgent');
-  expect(customResources).toContain('SELF_SERVICE');
+  expect(customResources).toContain('ORCHESTRATION');
+  expect(customResources).toContain('Connect.SelfService');
+  expect(customResources).not.toContain('SELF_SERVICE');
   expect(customResources).toContain('QConnect');
   expect(customResources).toContain('assistantId');
   expect(customResources).toContain('aiAgentId');
+  expect(customResources).toContain('AssociateSecurityProfiles');
+  expect(customResources).toContain('DisassociateSecurityProfiles');
+  expect(customResources).toContain('AI_AGENT');
   const setDefault = Object.values(template.findResources('Custom::AWS')).find((resource) =>
     JSON.stringify(resource).includes('UpdateAssistantAIAgent')) as { DependsOn?: string | string[] };
-  expect([setDefault.DependsOn].flat()).toEqual(expect.arrayContaining(['MainFlow', 'CityQuestionsBotAlias']));
+  const setDefaultDependsOn = [setDefault.DependsOn].flat();
+  expect(setDefaultDependsOn).toEqual(expect.arrayContaining(['MainFlow', 'CityQuestionsBotAlias']));
+  for (const association of [
+    'AssociateVoiceAgentProfile',
+    'AssociateVoiceAgentVersionProfile',
+    'AssociateChatAgentProfile',
+    'AssociateChatAgentVersionProfile',
+  ]) {
+    expect(setDefaultDependsOn.some((dependency) => dependency?.startsWith(association))).toBe(true);
+  }
 
   const flow = contactFlow(template, 'HarborRidge311-Main');
   const content = flowDocument(flow.Properties.Content);
   const session = content.Actions.find((action) => action.Type === 'CreateWisdomSession');
   const lexBots = content.Actions.filter((action) => action.Type === 'ConnectParticipantWithLexBot');
   const toolCheck = content.Actions.find((action) => action.Identifier === 'check-tool');
-  const questionLanguage = content.Actions.find((action) => action.Identifier === 'check-question-language');
+  const orchestrator = content.Actions.find((action) => action.Identifier === 'select-orchestrator');
+  const escalation = content.Actions.find((action) => action.Identifier === 'set-escalation');
   expect(session?.Parameters?.WisdomAssistantArn).toBe('token');
-  expect(session?.Transitions?.NextAction).toBe('check-question-language');
+  expect(session?.Transitions?.NextAction).toBe('select-orchestrator');
   expect(session?.Transitions?.Errors?.[0].NextAction).toBe('play-goodbye');
-  expect(questionLanguage?.Parameters?.ComparisonValue).toBe('$.LanguageCode');
-  expect(questionLanguage?.Transitions?.Conditions?.find((branch) => branch.Condition.Operands[0] === 'es-US')?.NextAction)
-    .toBe('ask-es-question');
-  expect(lexBots.map((action) => action.Parameters?.Text)).toEqual(expect.arrayContaining([
+  expect(content.Actions.some((action) => action.Identifier === 'check-question-language')).toBe(false);
+  expect(content.Actions.some((action) => action.Identifier === 'ask-es-question')).toBe(false);
+  expect(lexBots.map((action) => action.Parameters?.Text)).toEqual([
     'What can I help you with? You can ask about trash pickup, potholes, parking permits, or office hours. Say agent if you would rather talk to a person.',
-    '¿En qué puedo ayudarle? Puede preguntar sobre la recolección de basura, los baches, los permisos de estacionamiento o el horario. Diga agente si prefiere hablar con una persona.',
-  ]));
+  ]);
   expect(lexBots.every((action) => action.Parameters?.LexV2Bot?.AliasArn === 'token')).toBe(true);
   expect(JSON.stringify(lexBots)).toContain('"x-amz-lex:q-in-connect:session-arn":"$.Wisdom.SessionArn"');
-  expect(lexBots).toHaveLength(2);
+  expect(lexBots).toHaveLength(1);
   for (const action of lexBots) {
     const branch = (errorType: string) =>
       action.Transitions?.Errors?.find((error) => error.ErrorType === errorType)?.NextAction;
@@ -347,19 +445,41 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
     expect(branch('NoMatchingError')).toBe('check-hours');
     expect(action.Transitions?.NextAction).toBe('check-hours');
   }
+  expect(orchestrator?.Type).toBe('InvokeLambdaFunction');
+  expect(orchestrator?.Transitions?.NextAction).toBe('ask-en-question');
+  expect(orchestrator?.Transitions?.Errors?.[0].NextAction).toBe('ask-en-question');
+  expect(JSON.stringify(orchestrator?.Parameters)).toContain('"sessionArn":"$.Wisdom.SessionArn"');
   expect(toolCheck?.Parameters?.ComparisonValue).toBe('$.Lex.SessionAttributes.Tool');
-  expect(toolCheck?.Transitions?.Conditions?.find((branch) => branch.Condition.Operands[0] === 'COMPLETE')?.NextAction)
+  expect(toolCheck?.Transitions?.Conditions?.find((branch) => branch.Condition.Operands[0] === 'Complete')?.NextAction)
     .toBe('play-goodbye');
-  expect(toolCheck?.Transitions?.Conditions?.find((branch) => branch.Condition.Operands[0] === 'ESCALATION')?.NextAction)
-    .toBe('check-hours');
+  expect(toolCheck?.Transitions?.Conditions?.find((branch) => branch.Condition.Operands[0] === 'Escalate')?.NextAction)
+    .toBe('set-escalation');
+  expect(toolCheck?.Transitions?.Conditions?.some((branch) => branch.Condition.Operands[0] === 'COMPLETE')).toBe(false);
+  expect(toolCheck?.Transitions?.Conditions?.some((branch) => branch.Condition.Operands[0] === 'ESCALATION')).toBe(false);
   expect(toolCheck?.Transitions?.Errors?.[0]).toEqual({
     ErrorType: 'NoMatchingCondition',
     NextAction: 'check-hours',
   });
+  expect(escalation?.Type).toBe('UpdateContactAttributes');
+  expect(escalation?.Transitions?.NextAction).toBe('check-hours');
+  expect(JSON.stringify(escalation?.Parameters)).toContain('"escalationReason":"$.Lex.SessionAttributes.escalationReason"');
+  expect(JSON.stringify(escalation?.Parameters)).toContain('"escalationSummary":"$.Lex.SessionAttributes.escalationSummary"');
+  expect(JSON.stringify(escalation?.Parameters)).toContain('"customerIntent":"$.Lex.SessionAttributes.customerIntent"');
+  expect(JSON.stringify(escalation?.Parameters)).toContain('"sentiment":"$.Lex.SessionAttributes.sentiment"');
   expect(content.Actions.find((action) => action.Identifier === 'play-greeting')?.Transitions?.NextAction)
     .toBe('create-assistant-session');
   expect(content.Actions.map((action) => action.Identifier).every((id) => content.Metadata.ActionMetadata[id]?.position))
     .toBe(true);
+
+  const associateStatements = policyStatements(template).filter((statement) => {
+    const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action];
+    return actions.some((action) => action === 'connect:AssociateSecurityProfiles' || action === 'connect:DisassociateSecurityProfiles');
+  });
+  expect(associateStatements.length).toBeGreaterThan(0);
+  for (const statement of associateStatements) {
+    expect(JSON.stringify(statement.Resource)).not.toContain('*');
+    expect(statement.Action).not.toContain('*');
+  }
 
   const wisdomStatements = policyStatements(template).filter((statement) => {
     const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action];
@@ -396,10 +516,10 @@ test('ConnectStack records an after-hours voicemail when the office is closed', 
   const logging = main.Actions.find((action) => action.Identifier === 'enable-flow-logging');
   const hoursCheck = main.Actions.find((action) => action.Identifier === 'check-hours');
   expect(main.StartAction).toBe('enable-flow-logging');
-  expect(logging?.Transitions?.NextAction).toBe('select-language');
+  expect(logging?.Transitions?.NextAction).toBe('set-en-language');
   const beforeLanguage: string[] = [];
   let cursor: string | undefined = main.StartAction;
-  while (cursor && cursor !== 'select-language') {
+  while (cursor && cursor !== 'set-en-language') {
     beforeLanguage.push(cursor);
     cursor = main.Actions.find((action) => action.Identifier === cursor)?.Transitions?.NextAction;
   }
@@ -418,8 +538,9 @@ test('ConnectStack records an after-hours voicemail when the office is closed', 
   expect(placeholder?.Parameters?.Text).toBe('This is where we would escalate to an agent.');
   expect(placeholder?.Transitions?.NextAction).toBe('disconnect');
   expect(main.Actions.find((action) => action.Identifier === 'transfer-after-hours')?.Type).toBe('TransferToFlow');
-  expect(main.Actions.find((action) => action.Identifier === 'select-language')?.Transitions?.NextAction)
-    .toBe('set-en-language');
+  expect(main.Actions.find((action) => action.Identifier === 'set-en-language')?.Transitions?.NextAction)
+    .toBe('set-en-voice');
+  expect(main.Actions.some((action) => action.Identifier === 'select-language')).toBe(false);
 
   const afterHours = contactFlow(template, 'HarborRidge311-AfterHours');
   expect(afterHours.Properties.Type).toBe('CONTACT_FLOW');
