@@ -18,6 +18,9 @@ SSM parameters, read at deploy time with `StringParameter.valueForStringParamete
 - `/connect/sandbox/phone-number`
 - `/connect/sandbox/assistant-arn`
 - `/connect/sandbox/assistant-id`
+- `/connect/sandbox/cases-domain-id`
+
+The Cases domain stays in connect-platform. This stack adds the Active template `Harbor Ridge 311 Service Request` so an agent can open a case. The layout shows request category, service address, the system summary, and the system customer. Title and category are required. Category choices are Trash pickup, Pothole, Parking permit, and Other.
 
 This app has no stage context. connect-platform only publishes `sandbox`, so those paths live in one constant, `SANDBOX_PARAMETER_PREFIX`, in `lib/connect-stack.ts`.
 

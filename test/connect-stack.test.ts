@@ -205,7 +205,7 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
   template.resourceCountIs('AWS::Lex::BotVersion', 1);
   template.resourceCountIs('AWS::Lex::BotAlias', 1);
   template.resourceCountIs('AWS::Connect::IntegrationAssociation', 2);
-  template.resourceCountIs('Custom::AWS', 2);
+  template.resourceCountIs('Custom::AWS', 3);
 
   template.hasResourceProperties('AWS::S3::Bucket', {
     PublicAccessBlockConfiguration: {
@@ -525,6 +525,108 @@ test('ConnectStack records an after-hours voicemail when the office is closed', 
   expect(indexerJson).toContain('/contact/*');
   expect(indexerJson).not.toContain('s3:prefix');
   expect(indexerJson).not.toContain('s3:ListBucket');
+});
+
+test('ConnectStack adds an active Harbor Ridge 311 case template', () => {
+  const app = new cdk.App();
+  const template = Template.fromStack(new ConnectStack(app, 'ConnectStack'));
+
+  template.resourceCountIs('AWS::Cases::Domain', 0);
+  template.resourceCountIs('AWS::Cases::Field', 2);
+  template.resourceCountIs('AWS::Cases::Layout', 1);
+  template.resourceCountIs('AWS::Cases::Template', 1);
+
+  template.hasResourceProperties('AWS::Cases::Field', {
+    Name: 'Request category',
+    Type: 'SingleSelect',
+  });
+  template.hasResourceProperties('AWS::Cases::Field', {
+    Name: 'Service address',
+    Type: 'Text',
+    Attributes: { Text: { IsMultiline: false } },
+  });
+  const fieldNames = Object.values(template.findResources('AWS::Cases::Field')).map((resource) => (
+    resource as { Properties: { Name: string } }
+  ).Properties.Name);
+  expect(fieldNames.sort()).toEqual(['Request category', 'Service address']);
+
+  const parameters = template.toJSON().Parameters as Record<string, { Default?: string }>;
+  const casesDomainParameter = Object.entries(parameters).find(([, parameter]) => (
+    parameter.Default === '/connect/sandbox/cases-domain-id'
+  ));
+  expect(casesDomainParameter).toBeDefined();
+  const casesResources = {
+    ...template.findResources('AWS::Cases::Field'),
+    ...template.findResources('AWS::Cases::Layout'),
+    ...template.findResources('AWS::Cases::Template'),
+  };
+  for (const resource of Object.values(casesResources) as Array<{
+    DeletionPolicy?: string;
+    UpdateReplacePolicy?: string;
+    Properties: { DomainId?: unknown };
+  }>) {
+    expect(resource.DeletionPolicy).toBe('Delete');
+    expect(resource.UpdateReplacePolicy).toBe('Delete');
+    expect(resource.Properties.DomainId).toEqual({ Ref: casesDomainParameter?.[0] });
+  }
+
+  const categoryId = Object.entries(template.findResources('AWS::Cases::Field')).find(([, resource]) => (
+    (resource as { Properties: { Name: string } }).Properties.Name === 'Request category'
+  ))?.[0];
+  const addressId = Object.entries(template.findResources('AWS::Cases::Field')).find(([, resource]) => (
+    (resource as { Properties: { Name: string } }).Properties.Name === 'Service address'
+  ))?.[0];
+  template.hasResourceProperties('AWS::Cases::Layout', {
+    Name: 'Harbor Ridge 311 Service Request',
+    Content: {
+      Basic: {
+        TopPanel: {
+          Sections: [{
+            FieldGroup: {
+              Fields: [
+                { Id: { 'Fn::GetAtt': [categoryId, 'FieldId'] } },
+                { Id: { 'Fn::GetAtt': [addressId, 'FieldId'] } },
+                { Id: 'summary' },
+                { Id: 'customer_id' },
+              ],
+            },
+          }],
+        },
+      },
+    },
+  });
+  const layout = JSON.stringify(template.findResources('AWS::Cases::Layout'));
+  expect(layout).not.toContain('"title"');
+  expect(layout).not.toContain('"status"');
+
+  const layoutId = Object.keys(template.findResources('AWS::Cases::Layout'))[0];
+  template.hasResourceProperties('AWS::Cases::Template', {
+    Name: 'Harbor Ridge 311 Service Request',
+    Status: 'Active',
+    LayoutConfiguration: { DefaultLayout: { 'Fn::GetAtt': [layoutId, 'LayoutId'] } },
+    RequiredFields: [
+      { FieldId: 'title' },
+      { FieldId: { 'Fn::GetAtt': [categoryId, 'FieldId'] } },
+    ],
+  });
+
+  const options = JSON.stringify(template.findResources('Custom::AWS'));
+  expect(options).toContain('BatchPutFieldOptions');
+  expect(options).toContain('Trash pickup');
+  expect(options).toContain('trash-pickup');
+  expect(options).toContain('Pothole');
+  expect(options).toContain('pothole');
+  expect(options).toContain('Parking permit');
+  expect(options).toContain('parking-permit');
+  expect(options).toContain('Other');
+  expect(options).toContain('\\"active\\":false');
+  const optionPolicies = policyStatements(template).filter((statement) => {
+    const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action];
+    return actions.some((action) => action.startsWith('cases:'));
+  });
+  expect(optionPolicies).toHaveLength(1);
+  expect([optionPolicies[0]?.Action].flat()).toEqual(['cases:BatchPutFieldOptions']);
+  expect(resourceValues(optionPolicies[0]?.Resource).some((resource) => resource === '*')).toBe(false);
 });
 
 test('ConnectStack hours can be overridden', () => {
