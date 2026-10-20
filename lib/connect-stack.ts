@@ -1,5 +1,6 @@
 import * as path from 'node:path';
 import * as appintegrations from 'aws-cdk-lib/aws-appintegrations';
+import * as cases from 'aws-cdk-lib/aws-cases';
 import * as connect from 'aws-cdk-lib/aws-connect';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as events from 'aws-cdk-lib/aws-events';
@@ -121,6 +122,10 @@ export class ConnectStack extends cdk.Stack {
     const storageBucketName = ssm.StringParameter.valueForStringParameter(
       this,
       `${SANDBOX_PARAMETER_PREFIX}/storage-bucket`,
+    );
+    const casesDomainId = ssm.StringParameter.valueForStringParameter(
+      this,
+      `${SANDBOX_PARAMETER_PREFIX}/cases-domain-id`,
     );
     const storageBucket = s3.Bucket.fromBucketName(this, 'StorageBucket', storageBucketName);
 
@@ -550,6 +555,91 @@ export class ConnectStack extends cdk.Stack {
       },
       targets: [new targets.LambdaFunction(voicemailIndexer)],
     });
+
+    const requestCategory = new cases.CfnField(this, 'RequestCategory', {
+      domainId: casesDomainId,
+      name: 'Request category',
+      type: 'SingleSelect',
+    });
+    const serviceAddress = new cases.CfnField(this, 'ServiceAddress', {
+      domainId: casesDomainId,
+      name: 'Service address',
+      type: 'Text',
+      attributes: { text: { isMultiline: false } },
+    });
+    const serviceRequestLayout = new cases.CfnLayout(this, 'ServiceRequestLayout', {
+      domainId: casesDomainId,
+      name: 'Harbor Ridge 311 Service Request',
+      content: {
+        basic: {
+          topPanel: {
+            sections: [{
+              fieldGroup: {
+                fields: [
+                  { id: requestCategory.attrFieldId },
+                  { id: serviceAddress.attrFieldId },
+                  { id: 'summary' },
+                  { id: 'customer_id' },
+                ],
+              },
+            }],
+          },
+        },
+      },
+    });
+    const serviceRequest = new cases.CfnTemplate(this, 'ServiceRequestTemplate', {
+      domainId: casesDomainId,
+      name: 'Harbor Ridge 311 Service Request',
+      status: 'Active',
+      layoutConfiguration: { defaultLayout: serviceRequestLayout.attrLayoutId },
+      requiredFields: [
+        { fieldId: 'title' },
+        { fieldId: requestCategory.attrFieldId },
+      ],
+    });
+    for (const resource of [requestCategory, serviceAddress, serviceRequestLayout, serviceRequest]) {
+      resource.applyRemovalPolicy(cdk.RemovalPolicy.DESTROY);
+    }
+
+    const categoryOptions = [
+      { name: 'Trash pickup', value: 'trash-pickup' },
+      { name: 'Pothole', value: 'pothole' },
+      { name: 'Parking permit', value: 'parking-permit' },
+      { name: 'Other', value: 'other' },
+    ];
+    const categoryOptionCall = (active: boolean): cr.AwsSdkCall => ({
+      service: 'ConnectCases',
+      action: 'BatchPutFieldOptions',
+      parameters: {
+        domainId: casesDomainId,
+        fieldId: requestCategory.attrFieldId,
+        options: categoryOptions.map((option) => ({ ...option, active })),
+      },
+      physicalResourceId: cr.PhysicalResourceId.of('HarborRidge311-RequestCategory'),
+    });
+    const requestCategoryOptions = new cr.AwsCustomResource(this, 'RequestCategoryOptions', {
+      installLatestAwsSdk: true,
+      onCreate: categoryOptionCall(true),
+      onUpdate: categoryOptionCall(true),
+      onDelete: {
+        ...categoryOptionCall(false),
+        ignoreErrorCodesMatching: 'ValidationException',
+      },
+      policy: cr.AwsCustomResourcePolicy.fromStatements([
+        new iam.PolicyStatement({
+          actions: ['cases:BatchPutFieldOptions'],
+          resources: [
+            this.formatArn({
+              service: 'cases',
+              resource: 'domain',
+              resourceName: casesDomainId,
+            }),
+            requestCategory.attrFieldArn,
+          ],
+        }),
+      ]),
+    });
+    serviceRequest.node.addDependency(requestCategoryOptions);
 
     new cdk.CfnOutput(this, 'ContactFlowArn', {
       value: flow.attrContactFlowArn,
