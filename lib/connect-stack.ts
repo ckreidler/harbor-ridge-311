@@ -616,6 +616,9 @@ export class ConnectStack extends cdk.Stack {
       functionName: 'HarborRidge311-SelectOrchestrator',
       logGroup: orchestratorLogGroup,
       role: orchestratorRole,
+      bundling: {
+        externalModules: [],
+      },
       environment: {
         ASSISTANT_ID: assistantId,
         VOICE_AGENT_VERSION_ID: voiceOrchestrator.agentVersion.attrAiAgentVersionId,

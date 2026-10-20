@@ -1,20 +1,8 @@
+import { QConnectClient, UpdateSessionCommand, type UpdateSessionCommandInput } from '@aws-sdk/client-qconnect';
+
 export const SELF_SERVICE_USE_CASE = 'Connect.SelfService';
 
-interface QConnectModule {
-  QConnectClient: new (config?: { region?: string }) => {
-    send(command: unknown): Promise<unknown>;
-  };
-  UpdateSessionCommand: new (input: UpdateSessionInput) => unknown;
-}
-
-export interface UpdateSessionInput {
-  assistantId: string;
-  sessionId: string;
-  orchestratorConfigurationList: Array<{
-    aiAgentId: string;
-    orchestratorUseCase: string;
-  }>;
-}
+export type { UpdateSessionCommandInput };
 
 export interface SelectOrchestratorEvent {
   Details?: {
@@ -24,8 +12,9 @@ export interface SelectOrchestratorEvent {
 }
 
 export const selectOrchestratorRuntime = {
-  loadSdk<T>(specifier: string): Promise<T> {
-    return import(specifier) as Promise<T>;
+  async updateSession(input: UpdateSessionCommandInput): Promise<void> {
+    const client = new QConnectClient({});
+    await client.send(new UpdateSessionCommand(input));
   },
 };
 
@@ -54,18 +43,13 @@ export async function handler(event: SelectOrchestratorEvent): Promise<{ channel
   if (!assistantId) {
     throw new Error('Missing ASSISTANT_ID');
   }
-  const { QConnectClient, UpdateSessionCommand } = await selectOrchestratorRuntime.loadSdk<QConnectModule>(
-    '@aws-sdk/client-qconnect',
-  );
-  const client = new QConnectClient({});
-  const input: UpdateSessionInput = {
+  await selectOrchestratorRuntime.updateSession({
     assistantId,
     sessionId: sessionArn,
     orchestratorConfigurationList: [{
       aiAgentId: agentVersionForChannel(channel),
       orchestratorUseCase: SELF_SERVICE_USE_CASE,
     }],
-  };
-  await client.send(new UpdateSessionCommand(input));
+  });
   return { channel };
 }

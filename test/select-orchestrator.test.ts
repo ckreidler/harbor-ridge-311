@@ -1,4 +1,4 @@
-import { agentVersionForChannel, handler, selectOrchestratorRuntime, type UpdateSessionInput } from '../lib/select-orchestrator';
+import { agentVersionForChannel, handler, selectOrchestratorRuntime, type UpdateSessionCommandInput } from '../lib/select-orchestrator';
 
 const SESSION_ARN = 'arn:aws:wisdom:us-west-2:945777367807:session/assistant/session';
 
@@ -24,27 +24,16 @@ test('agentVersionForChannel uses the chat agent only for chat contacts', () => 
 });
 
 test('handler updates the session orchestrator for the contact channel', async () => {
-  const updates: UpdateSessionInput[] = [];
-  const loadSdk = selectOrchestratorRuntime.loadSdk;
-  selectOrchestratorRuntime.loadSdk = (async () => ({
-    QConnectClient: class {
-      send(command: { input: UpdateSessionInput }) {
-        updates.push(command.input);
-        return Promise.resolve({});
-      }
-    },
-    UpdateSessionCommand: class {
-      readonly input: UpdateSessionInput;
-      constructor(input: UpdateSessionInput) {
-        this.input = input;
-      }
-    },
-  })) as typeof selectOrchestratorRuntime.loadSdk;
+  const updates: UpdateSessionCommandInput[] = [];
+  const updateSession = selectOrchestratorRuntime.updateSession;
+  selectOrchestratorRuntime.updateSession = async (input) => {
+    updates.push(input);
+  };
   try {
     await expect(handler(event('CHAT'))).resolves.toEqual({ channel: 'CHAT' });
     await expect(handler(event('VOICE'))).resolves.toEqual({ channel: 'VOICE' });
   } finally {
-    selectOrchestratorRuntime.loadSdk = loadSdk;
+    selectOrchestratorRuntime.updateSession = updateSession;
   }
   expect(updates).toEqual([
     {

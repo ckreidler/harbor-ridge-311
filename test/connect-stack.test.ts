@@ -1,3 +1,5 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import * as cdk from 'aws-cdk-lib/core';
 import { ConnectStack, VOICEMAIL_RECORDING_KEY_PATTERN } from '../lib/connect-stack';
@@ -47,6 +49,18 @@ function flowDocument(content: unknown): FlowContent {
     return JSON.parse(text) as FlowContent;
   }
   throw new Error(`unexpected flow content: ${JSON.stringify(content)}`);
+}
+
+function bundledHandler(template: Template, functionName: string, assetOutdir: string): string {
+  const functions = template.findResources('AWS::Lambda::Function') as Record<string, {
+    Properties: { FunctionName?: string; Code?: { S3Key?: string } };
+  }>;
+  const resource = Object.values(functions).find((candidate) => candidate.Properties.FunctionName === functionName);
+  const key = resource?.Properties.Code?.S3Key;
+  if (!key) {
+    throw new Error(`missing code asset for ${functionName}`);
+  }
+  return fs.readFileSync(path.join(assetOutdir, `asset.${key.replace(/\.zip$/, '')}`, 'index.js'), 'utf8');
 }
 
 function contactFlow(template: Template, name: string) {
@@ -176,7 +190,8 @@ function resourceValues(resource: unknown): string[] {
 
 test('ConnectStack answers city questions from Q in Connect and falls back to goodbye', () => {
   const app = new cdk.App();
-  const template = Template.fromStack(new ConnectStack(app, 'ConnectStack'));
+  const stack = new ConnectStack(app, 'ConnectStack');
+  const template = Template.fromStack(stack);
 
   template.resourceCountIs('AWS::S3::Bucket', 1);
   template.resourceCountIs('AWS::KMS::Key', 1);
@@ -363,6 +378,36 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
     resource as { Properties: { IntegrationType: string } }
   ).Properties.IntegrationType);
   expect(integrationTypes.sort()).toEqual(['LAMBDA_FUNCTION', 'LEX_BOT', 'WISDOM_KNOWLEDGE_BASE']);
+  const lambdaIntegrations = Object.values(integrations).filter((resource) => (
+    resource as { Properties: { IntegrationType: string } }
+  ).Properties.IntegrationType === 'LAMBDA_FUNCTION');
+  expect(lambdaIntegrations).toHaveLength(1);
+
+  const parameters = template.toJSON().Parameters as Record<string, { Default?: string }>;
+  const instanceArnParameter = Object.entries(parameters).find(([, parameter]) => (
+    parameter.Default === '/connect/sandbox/instance-arn'
+  ))?.[0];
+  const connectPermissions = Object.values(template.findResources('AWS::Lambda::Permission') as Record<string, {
+    Properties: { Action?: string; Principal?: string; SourceArn?: { Ref?: string } };
+  }>).filter((permission) => permission.Properties.Principal === 'connect.amazonaws.com');
+  expect(connectPermissions).toHaveLength(1);
+  expect(connectPermissions[0]?.Properties.Action).toBe('lambda:InvokeFunction');
+  expect(connectPermissions[0]?.Properties.SourceArn).toEqual({ Ref: instanceArnParameter });
+
+  template.hasResourceProperties('AWS::Lambda::Function', {
+    FunctionName: 'HarborRidge311-SelectOrchestrator',
+    Timeout: 8,
+    Runtime: 'nodejs22.x',
+  });
+  const selectOrchestratorBundle = bundledHandler(template, 'HarborRidge311-SelectOrchestrator', app.assetOutdir);
+  expect(selectOrchestratorBundle).toContain('var UpdateSessionRequest$ = [');
+  expect(selectOrchestratorBundle).toContain('var _oCL = "orchestratorConfigurationList"');
+  expect(selectOrchestratorBundle).toContain('_oCL, _rOCL]');
+  expect(selectOrchestratorBundle).toContain('() => OrchestratorConfigurationList');
+  expect(selectOrchestratorBundle).not.toMatch(/require\(["']@aws-sdk\/client-qconnect["']\)/);
+  const voicemailBundle = bundledHandler(template, 'HarborRidge311-VoicemailIndexer', app.assetOutdir);
+  expect(voicemailBundle).not.toContain('UpdateSessionRequest$');
+  expect(voicemailBundle).not.toContain('@aws-sdk/client-qconnect');
 
   const parameterDefaults = Object.values(template.toJSON().Parameters as Record<string, { Default?: string }>)
     .map((parameter) => parameter.Default);
@@ -447,7 +492,9 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
   }
   expect(orchestrator?.Type).toBe('InvokeLambdaFunction');
   expect(orchestrator?.Transitions?.NextAction).toBe('ask-en-question');
-  expect(orchestrator?.Transitions?.Errors?.[0].NextAction).toBe('ask-en-question');
+  expect(orchestrator?.Transitions?.Errors).toEqual([
+    { ErrorType: 'NoMatchingError', NextAction: 'ask-en-question' },
+  ]);
   expect(JSON.stringify(orchestrator?.Parameters)).toContain('"sessionArn":"$.Wisdom.SessionArn"');
   expect(toolCheck?.Parameters?.ComparisonValue).toBe('$.Lex.SessionAttributes.Tool');
   expect(toolCheck?.Transitions?.Conditions?.find((branch) => branch.Condition.Operands[0] === 'Complete')?.NextAction)
