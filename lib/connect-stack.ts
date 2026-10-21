@@ -13,6 +13,7 @@ import * as nodejs from 'aws-cdk-lib/aws-lambda-nodejs';
 import * as lex from 'aws-cdk-lib/aws-lex';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
@@ -21,6 +22,7 @@ import * as cdk from 'aws-cdk-lib/core';
 import * as cr from 'aws-cdk-lib/custom-resources';
 import { Construct } from 'constructs';
 import { afterHoursFlow } from './flows/after-hours-flow';
+import { escalationGuideFlow } from './flows/escalation-guide-flow';
 import { mainFlow } from './flows/main-flow';
 import { ORCHESTRATION_MODEL_ID, orchestrationPrompt } from './orchestration-prompt';
 import { SELF_SERVICE_USE_CASE } from './select-orchestrator';
@@ -683,11 +685,92 @@ export class ConnectStack extends cdk.Stack {
       })),
     });
 
+    const queue = new connect.CfnQueue(this, 'GeneralQueue', {
+      instanceArn,
+      name: 'HarborRidge311-General',
+      description: 'Harbor Ridge 311 general queue',
+      hoursOfOperationArn: hoursOfOperation.attrHoursOfOperationArn,
+      status: 'ENABLED',
+    });
+    const agentRoutingProfile = new connect.CfnRoutingProfile(this, 'AgentRoutingProfile', {
+      instanceArn,
+      name: 'HarborRidge311-Agents',
+      description: 'Harbor Ridge 311 voice and chat agents',
+      defaultOutboundQueueArn: queue.attrQueueArn,
+      mediaConcurrencies: [
+        { channel: 'VOICE', concurrency: 1 },
+        { channel: 'CHAT', concurrency: 2 },
+      ],
+      queueConfigs: (['VOICE', 'CHAT'] as const).map((channel) => ({
+        delay: 0,
+        priority: 1,
+        queueReference: { channel, queueArn: queue.attrQueueArn },
+      })),
+    });
+    const agentSecurityProfile = new connect.CfnSecurityProfile(this, 'AgentSecurityProfile', {
+      instanceArn,
+      securityProfileName: 'HarborRidge311-Agent',
+      description: 'Lets a Harbor Ridge 311 agent handle contacts, step-by-step guides, Q in Connect, and cases.',
+      permissions: [
+        'BasicAgentAccess',
+        'CustomViews.Access',
+        'Wisdom.View',
+        'Cases.View',
+        'Cases.Edit',
+      ],
+    });
+    const agentPassword = new secretsmanager.Secret(this, 'AgentPassword', {
+      description: 'Password for the Harbor Ridge 311 test agent',
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      generateSecretString: {
+        passwordLength: 32,
+        requireEachIncludedType: true,
+        excludePunctuation: false,
+        includeSpace: false,
+        excludeCharacters: ' "\'\\`',
+      },
+    });
+    new connect.CfnUser(this, 'AgentUser', {
+      instanceArn,
+      username: 'harborridge-agent1',
+      password: cdk.Fn.join('', [
+        '{{resolve:secretsmanager:',
+        agentPassword.secretArn,
+        ':SecretString:::}}',
+      ]),
+      identityInfo: {
+        firstName: 'Harbor',
+        lastName: 'Agent',
+        email: 'harborridge-agent1@example.com',
+      },
+      phoneConfig: {
+        phoneType: 'SOFT_PHONE',
+        autoAccept: false,
+      },
+      routingProfileArn: agentRoutingProfile.attrRoutingProfileArn,
+      securityProfileArns: [agentSecurityProfile.attrSecurityProfileArn],
+    });
+
     const afterHours = new connect.CfnContactFlow(this, 'AfterHoursFlow', {
       instanceArn,
       name: 'HarborRidge311-AfterHours',
       type: 'CONTACT_FLOW',
       content: cdk.Fn.toJsonString(afterHoursFlow()),
+    });
+
+    const escalationGuide = new connect.CfnContactFlow(this, 'EscalationGuide', {
+      instanceArn,
+      name: 'HarborRidge311-EscalationGuide',
+      type: 'CONTACT_FLOW',
+      content: cdk.Fn.toJsonString(escalationGuideFlow({
+        detailViewArn: cdk.Fn.join('', [
+          'arn:',
+          cdk.Aws.PARTITION,
+          ':connect:',
+          cdk.Aws.REGION,
+          ':aws:view/detail:1',
+        ]),
+      })),
     });
 
     const flow = new connect.CfnContactFlow(this, 'MainFlow', {
@@ -701,6 +784,8 @@ export class ConnectStack extends cdk.Stack {
         orchestratorLambdaArn: selectOrchestrator.functionArn,
         hoursOfOperationArn: hoursOfOperation.attrHoursOfOperationArn,
         afterHoursFlowArn: afterHours.attrContactFlowArn,
+        queueArn: queue.attrQueueArn,
+        escalationGuideFlowArn: escalationGuide.attrContactFlowArn,
       })),
     });
     flow.node.addDependency(...promptRows, lexAssociation, orchestratorAssociation);
@@ -922,6 +1007,11 @@ export class ConnectStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'LexBotAliasArn', {
       value: botAlias.attrArn,
       description: 'ARN of the Lex V2 alias used for city questions',
+    });
+
+    new cdk.CfnOutput(this, 'AgentPasswordSecretArn', {
+      value: agentPassword.secretArn,
+      description: 'Secrets Manager ARN for the Harbor Ridge 311 test agent password',
     });
   }
 }

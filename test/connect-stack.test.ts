@@ -82,7 +82,7 @@ test('ConnectStack looks up the English prompts and associates the sandbox numbe
   const app = new cdk.App();
   const template = Template.fromStack(new ConnectStack(app, 'ConnectStack'));
 
-  template.resourceCountIs('AWS::Connect::ContactFlow', 2);
+  template.resourceCountIs('AWS::Connect::ContactFlow', 3);
   template.resourceCountIs('AWS::Connect::DataTable', 1);
   template.resourceCountIs('AWS::Connect::DataTableAttribute', 3);
   template.resourceCountIs('AWS::Connect::DataTableRecord', 6);
@@ -300,7 +300,7 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
   template.resourceCountIs('AWS::Wisdom::AIAgentVersion', 2);
   template.resourceCountIs('AWS::Wisdom::AIPrompt', 2);
   template.resourceCountIs('AWS::Wisdom::AIPromptVersion', 2);
-  template.resourceCountIs('AWS::Connect::SecurityProfile', 1);
+  template.resourceCountIs('AWS::Connect::SecurityProfile', 2);
   template.resourceCountIs('AWS::Lex::Bot', 1);
   template.resourceCountIs('AWS::Lex::BotVersion', 1);
   template.resourceCountIs('AWS::Lex::BotAlias', 1);
@@ -693,17 +693,14 @@ test('ConnectStack records an after-hours voicemail when the office is closed', 
   expect(main.Actions.some((action) => action.Identifier === 'set-en-language')).toBe(false);
   expect(hoursCheck?.Type).toBe('CheckHoursOfOperation');
   expect(hoursCheck?.Transitions?.Conditions?.find((branch) => branch.Condition.Operands[0] === 'True')?.NextAction)
-    .toBe('play-agent-placeholder');
+    .toBe('set-event-flow');
   expect(hoursCheck?.Transitions?.Conditions?.find((branch) => branch.Condition.Operands[0] === 'False')?.NextAction)
     .toBe('transfer-after-hours');
   expect(hoursCheck?.Transitions?.Errors?.[0]).toEqual({
     ErrorType: 'NoMatchingError',
     NextAction: 'transfer-after-hours',
   });
-  const placeholder = main.Actions.find((action) => action.Identifier === 'play-agent-placeholder');
-  expect(placeholder?.Type).toBe('MessageParticipant');
-  expect(placeholder?.Parameters?.Text).toBe('This is where we would escalate to an agent.');
-  expect(placeholder?.Transitions?.NextAction).toBe('disconnect');
+  expect(main.Actions.some((action) => action.Identifier === 'play-agent-placeholder')).toBe(false);
   expect(main.Actions.find((action) => action.Identifier === 'transfer-after-hours')?.Type).toBe('TransferToFlow');
   expect(main.Actions.find((action) => action.Identifier === 'set-en-voice')?.Transitions?.NextAction)
     .toBe('lookup-prompts');
@@ -938,6 +935,126 @@ test('ConnectStack adds an active Harbor Ridge 311 case template', () => {
     },
     { 'Fn::GetAtt': [categoryId, 'FieldArn'] },
   ]);
+});
+
+test('ConnectStack transfers an in-hours escalation and keeps the agent password out of the template', () => {
+  const app = new cdk.App();
+  const template = Template.fromStack(new ConnectStack(app, 'ConnectStack'));
+
+  template.hasResourceProperties('AWS::Connect::Queue', {
+    Name: 'HarborRidge311-General',
+    Status: 'ENABLED',
+    HoursOfOperationArn: { 'Fn::GetAtt': ['Hours', 'HoursOfOperationArn'] },
+  });
+  const queue = JSON.stringify(template.findResources('AWS::Connect::Queue'));
+  expect(queue).not.toContain('OutboundCallerConfig');
+
+  const queueArn = { 'Fn::GetAtt': ['GeneralQueue', 'QueueArn'] };
+  template.hasResourceProperties('AWS::Connect::RoutingProfile', {
+    Name: 'HarborRidge311-Agents',
+    DefaultOutboundQueueArn: queueArn,
+    MediaConcurrencies: [
+      { Channel: 'VOICE', Concurrency: 1 },
+      { Channel: 'CHAT', Concurrency: 2 },
+    ],
+    QueueConfigs: ['VOICE', 'CHAT'].map((channel) => ({
+      Delay: 0,
+      Priority: 1,
+      QueueReference: { Channel: channel, QueueArn: queueArn },
+    })),
+  });
+
+  const agentPermissions = [
+    'BasicAgentAccess',
+    'CustomViews.Access',
+    'Wisdom.View',
+    'Cases.View',
+    'Cases.Edit',
+  ];
+  template.hasResourceProperties('AWS::Connect::SecurityProfile', {
+    SecurityProfileName: 'HarborRidge311-Agent',
+    Permissions: agentPermissions,
+  });
+  const profiles = Object.values(template.findResources('AWS::Connect::SecurityProfile')) as Array<{
+    Properties: { Permissions: string[] };
+  }>;
+  expect(profiles).toHaveLength(2);
+  for (const profile of profiles) {
+    expect(profile.Properties.Permissions.some((permission) => permission.includes('*'))).toBe(false);
+  }
+
+  template.hasResourceProperties('AWS::Connect::User', {
+    Username: 'harborridge-agent1',
+    IdentityInfo: {
+      FirstName: 'Harbor',
+      LastName: 'Agent',
+      Email: 'harborridge-agent1@example.com',
+    },
+    PhoneConfig: {
+      PhoneType: 'SOFT_PHONE',
+      AutoAccept: false,
+    },
+    RoutingProfileArn: { 'Fn::GetAtt': ['AgentRoutingProfile', 'RoutingProfileArn'] },
+    SecurityProfileArns: [{ 'Fn::GetAtt': ['AgentSecurityProfile', 'SecurityProfileArn'] }],
+  });
+  const user = JSON.stringify(template.findResources('AWS::Connect::User'));
+  expect(user).not.toContain('DirectoryUserId');
+  expect(user).toContain('{{resolve:secretsmanager:');
+  expect(user).toContain(':SecretString:::}}');
+  expect(user).not.toMatch(/"Password":"[^{]/);
+
+  const secrets = template.findResources('AWS::SecretsManager::Secret') as Record<string, {
+    DeletionPolicy?: string;
+    Properties: {
+      SecretString?: string;
+      GenerateSecretString?: {
+        PasswordLength?: number;
+        RequireEachIncludedType?: boolean;
+        ExcludePunctuation?: boolean;
+        IncludeSpace?: boolean;
+      };
+    };
+  }>;
+  const secretIds = Object.keys(secrets);
+  expect(secretIds).toHaveLength(1);
+  const secret = secrets[secretIds[0]!];
+  expect(secret?.Properties.SecretString).toBeUndefined();
+  expect(secret?.Properties.GenerateSecretString?.PasswordLength).toBe(32);
+  expect(secret?.Properties.GenerateSecretString?.RequireEachIncludedType).toBe(true);
+  expect(secret?.Properties.GenerateSecretString?.ExcludePunctuation).not.toBe(true);
+  expect(secret?.Properties.GenerateSecretString?.IncludeSpace).not.toBe(true);
+  expect(secret?.DeletionPolicy).toBe('Delete');
+  const templateText = JSON.stringify(template.toJSON());
+  expect(templateText).not.toMatch(/"Password"\s*:\s*"(?!\{\{resolve:secretsmanager:)/);
+  template.hasOutput('AgentPasswordSecretArn', {
+    Value: { Ref: secretIds[0] },
+  });
+
+  const mainRaw = JSON.stringify(contactFlow(template, 'HarborRidge311-Main').Properties.Content);
+  expect(mainRaw).toContain('DefaultAgentUI');
+  expect(mainRaw).toContain('EscalationGuide');
+  expect(mainRaw).toContain('GeneralQueue');
+  expect(mainRaw).toContain('HoursOfOperationArn');
+  expect(mainRaw).not.toContain('play-agent-placeholder');
+  const main = flowDocument(contactFlow(template, 'HarborRidge311-Main').Properties.Content);
+  expect(main.Actions.find((action) => action.Identifier === 'set-event-flow')?.Transitions?.NextAction)
+    .toBe('set-working-queue');
+  expect(main.Actions.find((action) => action.Identifier === 'set-working-queue')?.Transitions?.NextAction)
+    .toBe('transfer-to-queue');
+  expect(main.Actions.find((action) => action.Identifier === 'transfer-to-queue')?.Type)
+    .toBe('TransferContactToQueue');
+
+  const guideRaw = JSON.stringify(contactFlow(template, 'HarborRidge311-EscalationGuide').Properties.Content);
+  expect(guideRaw).toContain('ShowView');
+  expect(guideRaw).toContain('view/detail:1');
+  expect(guideRaw).not.toContain('TemplateString');
+  for (const attribute of ['escalationReason', 'escalationSummary', 'customerIntent', 'sentiment']) {
+    expect(guideRaw.split(`$.Attributes.${attribute}`).length - 1).toBe(1);
+  }
+  const assistants = JSON.stringify(template.findResources('Custom::AWS'));
+  expect(assistants).toContain('ORCHESTRATION');
+  expect(assistants).not.toContain('ANSWER_RECOMMENDATION');
+  expect(assistants).not.toContain('MANUAL_SEARCH');
 });
 
 test('ConnectStack hours can be overridden', () => {

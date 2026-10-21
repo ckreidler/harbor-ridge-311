@@ -6,7 +6,7 @@ The `cdk.json` file tells the CDK Toolkit how to execute your app.
 
 ## ConnectStack
 
-`ConnectStack` reads the sandbox instance published by [connect-platform](https://github.com/ckreidler/connect-platform) and adds a contact flow named `HarborRidge311-Main` plus a data table named `HarborRidge311-PromptsByChannel`. The flow is English only. It sets the Joanna voice, then plays the greeting from the table. The caller can ask about trash pickup, potholes, parking permits, or office hours. Answers come from two Amazon Q in Connect orchestration agents, one for voice and one for chat, using FAQ documents in a private S3 bucket. The Lex bot has an English (US) locale. A completed answer plays the goodbye from the table. An escalation, or any path that does not finish the question, checks office hours. There is no human queue. A lookup error plays a hardcoded English fallback and hangs up. A custom resource calls `AssociatePhoneNumberContactFlow` so the sandbox number uses this flow, and `DisassociatePhoneNumberContactFlow` when the stack is deleted.
+`ConnectStack` reads the sandbox instance published by [connect-platform](https://github.com/ckreidler/connect-platform) and adds a contact flow named `HarborRidge311-Main` plus a data table named `HarborRidge311-PromptsByChannel`. The flow is English only. It sets the Joanna voice, then plays the greeting from the table. The caller can ask about trash pickup, potholes, parking permits, or office hours. Answers come from two Amazon Q in Connect orchestration agents, one for voice and one for chat, using FAQ documents in a private S3 bucket. The Lex bot has an English (US) locale. A completed answer plays the goodbye from the table. An escalation, or any path that does not finish the question, checks `HarborRidge311-Hours` (America/Los_Angeles, Monday through Friday 08:00-17:00). During those hours the flow sets `HarborRidge311-EscalationGuide` as the agent UI, sets the `HarborRidge311-General` queue, and transfers to it. After hours, the contact goes to the voicemail flow. If the queue transfer fails or the queue is at capacity, the flow plays the goodbye prompt. A lookup error plays a hardcoded English fallback and hangs up. A test agent, `harborridge-agent1`, uses a softphone. The password is generated in Secrets Manager and only the secret ARN is published. A custom resource calls `AssociatePhoneNumberContactFlow` so the sandbox number uses this flow, and `DisassociatePhoneNumberContactFlow` when the stack is deleted.
 
 The Q in Connect assistant is owned by connect-platform. This stack reads that assistant and associates the Harbor Ridge FAQ knowledge base and the Lex bot with the shared sandbox instance.
 
@@ -30,7 +30,7 @@ Deploy `ConnectPlatform-sandbox` in connect-platform first, so the assistant par
 npx cdk deploy ConnectStack
 ```
 
-Outputs are the contact flow ARN, the phone number, the sandbox assistant ARN, and the Lex bot alias ARN.
+Outputs are the contact flow ARN, the phone number, the sandbox assistant ARN, the Lex bot alias ARN, and the test agent password secret ARN.
 
 ## Touchpoint
 
