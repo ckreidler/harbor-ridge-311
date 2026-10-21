@@ -43,9 +43,19 @@ export interface MainFlowProps {
   afterHoursFlowArn: string;
 }
 
-const ENGLISH_GREETING = 'Thank you for calling Harbor Ridge 3 1 1. This line is a demo.';
-const ENGLISH_GOODBYE = 'Thank you for calling Harbor Ridge 3 1 1. Goodbye.';
-const ENGLISH_QUESTION = 'What can I help you with? You can ask about trash pickup, potholes, parking permits, or office hours. Say agent if you would rather talk to a person.';
+const VOICE_GREETING = 'Thank you for calling Harbor Ridge 3 1 1. This line is a demo.';
+const VOICE_GOODBYE = 'Thank you for calling Harbor Ridge 3 1 1. Goodbye.';
+
+function promptQuery(prompt: 'Greeting' | 'Goodbye' | 'Question') {
+  return {
+    QueryName: prompt,
+    Attributes: ['Text'],
+    PrimaryValues: [
+      { AttributeName: 'Prompt', Value: prompt },
+      { AttributeName: 'Channel', Value: '$.Channel' },
+    ],
+  };
+}
 
 function errorTo(nextAction: string): FlowError[] {
   return [{ ErrorType: 'NoMatchingError', NextAction: nextAction }];
@@ -56,24 +66,23 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
     Version: '2019-10-30',
     StartAction: 'enable-flow-logging',
     Metadata: {
-      entryPointPosition: { x: 40, y: 40 },
+      entryPointPosition: { x: 40, y: 360 },
       ActionMetadata: {
-        'enable-flow-logging': { position: { x: 160, y: 200 } },
-        'set-en-language': { position: { x: 420, y: 200 } },
-        'set-en-voice': { position: { x: 680, y: 200 } },
-        'lookup-prompts': { position: { x: 940, y: 200 } },
-        'play-greeting': { position: { x: 1200, y: 200 } },
-        'play-fallback': { position: { x: 1200, y: 480 } },
-        'create-assistant-session': { position: { x: 1460, y: 200 } },
-        'select-orchestrator': { position: { x: 1720, y: 200 } },
-        'ask-en-question': { position: { x: 1980, y: 200 } },
-        'check-tool': { position: { x: 2240, y: 200 } },
-        'play-goodbye': { position: { x: 2500, y: 40 } },
-        'set-escalation': { position: { x: 2500, y: 280 } },
-        'check-hours': { position: { x: 2760, y: 360 } },
-        'play-agent-placeholder': { position: { x: 3020, y: 280 } },
-        'transfer-after-hours': { position: { x: 3020, y: 520 } },
-        disconnect: { position: { x: 3280, y: 200 } },
+        'enable-flow-logging': { position: { x: 160, y: 360 } },
+        'set-en-voice': { position: { x: 440, y: 360 } },
+        'lookup-prompts': { position: { x: 720, y: 360 } },
+        'play-greeting': { position: { x: 1000, y: 360 } },
+        'play-fallback': { position: { x: 1000, y: 640 } },
+        'create-assistant-session': { position: { x: 1280, y: 360 } },
+        'select-orchestrator': { position: { x: 1560, y: 360 } },
+        'ask-en-question': { position: { x: 1840, y: 360 } },
+        'check-tool': { position: { x: 2120, y: 360 } },
+        'play-goodbye': { position: { x: 2400, y: 80 } },
+        'set-escalation': { position: { x: 2400, y: 640 } },
+        'check-hours': { position: { x: 2680, y: 640 } },
+        'play-agent-placeholder': { position: { x: 2960, y: 640 } },
+        'transfer-after-hours': { position: { x: 2960, y: 920 } },
+        disconnect: { position: { x: 3240, y: 360 } },
       },
     },
     Actions: [
@@ -84,20 +93,7 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
           FlowLoggingBehavior: 'Enabled',
         },
         Transitions: {
-          NextAction: 'set-en-language',
-        },
-      },
-      {
-        Identifier: 'set-en-language',
-        Type: 'UpdateContactData',
-        Parameters: {
-          LanguageCode: 'en-US',
-          TargetContact: 'Current',
-        },
-        Transitions: {
           NextAction: 'set-en-voice',
-          Errors: errorTo('set-en-voice'),
-          Conditions: [],
         },
       },
       {
@@ -119,13 +115,9 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
         Parameters: {
           DataTableId: props.dataTableId,
           Queries: [
-            {
-              QueryName: 'Prompts',
-              Attributes: ['Greeting', 'Goodbye'],
-              PrimaryValues: [
-                { AttributeName: 'Language', Value: '$.LanguageCode' },
-              ],
-            },
+            promptQuery('Greeting'),
+            promptQuery('Goodbye'),
+            promptQuery('Question'),
           ],
         },
         Transitions: {
@@ -138,7 +130,7 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
         Identifier: 'play-greeting',
         Type: 'MessageParticipant',
         Parameters: {
-          Text: '$.DataTables.Prompts.Greeting',
+          Text: '$.DataTables.Greeting.Text',
         },
         Transitions: {
           NextAction: 'create-assistant-session',
@@ -178,7 +170,7 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
         Identifier: 'ask-en-question',
         Type: 'ConnectParticipantWithLexBot',
         Parameters: {
-          Text: ENGLISH_QUESTION,
+          Text: '$.DataTables.Question.Text',
           LexV2Bot: {
             AliasArn: props.lexBotAliasArn,
           },
@@ -286,7 +278,7 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
         Identifier: 'play-goodbye',
         Type: 'MessageParticipant',
         Parameters: {
-          Text: '$.DataTables.Prompts.Goodbye',
+          Text: '$.DataTables.Goodbye.Text',
         },
         Transitions: {
           NextAction: 'disconnect',
@@ -298,7 +290,7 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
         Identifier: 'play-fallback',
         Type: 'MessageParticipant',
         Parameters: {
-          Text: `${ENGLISH_GREETING} ${ENGLISH_GOODBYE}`,
+          Text: `${VOICE_GREETING} ${VOICE_GOODBYE}`,
         },
         Transitions: {
           NextAction: 'disconnect',

@@ -85,25 +85,66 @@ test('ConnectStack looks up the English prompts and associates the sandbox numbe
   template.resourceCountIs('AWS::Connect::ContactFlow', 2);
   template.resourceCountIs('AWS::Connect::DataTable', 1);
   template.resourceCountIs('AWS::Connect::DataTableAttribute', 3);
-  template.resourceCountIs('AWS::Connect::DataTableRecord', 1);
+  template.resourceCountIs('AWS::Connect::DataTableRecord', 6);
 
   template.hasResourceProperties('AWS::Connect::DataTable', {
-    Name: 'HarborRidge311-Prompts',
+    Name: 'HarborRidge311-PromptsByChannel',
     Status: 'PUBLISHED',
   });
-  template.hasResourceProperties('AWS::Connect::DataTableAttribute', {
-    Name: 'Language',
-    Primary: true,
-    ValueType: 'TEXT',
+  expect(Object.keys(template.findResources('AWS::Connect::DataTable'))).toEqual(['PromptsByChannel']);
+  const tableChildren = JSON.stringify({
+    ...template.findResources('AWS::Connect::DataTableAttribute'),
+    ...template.findResources('AWS::Connect::DataTableRecord'),
   });
+  expect(tableChildren).toContain('PromptsByChannel');
+  expect(tableChildren).not.toContain('"Prompts"');
+  const parameters = JSON.stringify(template.findResources('AWS::SSM::Parameter'));
+  expect(parameters).not.toContain('Prompts');
+  expect(parameters).not.toContain('DataTable');
+  const attributes = template.findResources('AWS::Connect::DataTableAttribute') as Record<string, {
+    Properties: { Name: string; Primary?: boolean; ValueType: string };
+  }>;
+  const attributeByName = Object.fromEntries(Object.values(attributes).map((attribute) => [
+    attribute.Properties.Name,
+    attribute.Properties,
+  ]));
+  expect(attributeByName.Prompt).toMatchObject({ Primary: true, ValueType: 'TEXT' });
+  expect(attributeByName.Channel).toMatchObject({ Primary: true, ValueType: 'TEXT' });
+  expect(attributeByName.Text).toMatchObject({ ValueType: 'TEXT' });
+  expect(attributeByName.Text.Primary).toBeUndefined();
+  expect(attributeByName.Language).toBeUndefined();
 
-  const records = JSON.stringify(template.findResources('AWS::Connect::DataTableRecord'));
-  expect(records).toContain('en-US');
-  expect(records).toContain('Thank you for calling Harbor Ridge 3 1 1. This line is a demo.');
-  expect(records).toContain('Thank you for calling Harbor Ridge 3 1 1. Goodbye.');
+  const recordResources = template.findResources('AWS::Connect::DataTableRecord') as Record<string, {
+    Properties: {
+      DataTableRecord: {
+        PrimaryValues: Array<{ AttributeValue: string }>;
+        Values: Array<{ AttributeValue: string }>;
+      };
+    };
+  }>;
+  const rows = Object.values(recordResources).map((record) => ({
+    key: record.Properties.DataTableRecord.PrimaryValues.map((value) => value.AttributeValue).sort(),
+    text: record.Properties.DataTableRecord.Values.map((value) => value.AttributeValue),
+  }));
+  expect(rows).toEqual(expect.arrayContaining([
+    { key: ['Greeting', 'VOICE'], text: ['Thank you for calling Harbor Ridge 3 1 1. This line is a demo.'] },
+    { key: ['CHAT', 'Greeting'], text: ['Welcome to Harbor Ridge 311 chat. This is a demo.'] },
+    { key: ['Goodbye', 'VOICE'], text: ['Thank you for calling Harbor Ridge 3 1 1. Goodbye.'] },
+    { key: ['CHAT', 'Goodbye'], text: ['Thanks for chatting with Harbor Ridge 311. Goodbye.'] },
+    {
+      key: ['Question', 'VOICE'],
+      text: ['What can I help you with? You can ask about trash pickup, potholes, parking permits, or office hours. Say agent if you would rather talk to a person.'],
+    },
+    {
+      key: ['CHAT', 'Question'],
+      text: ['What can I help you with? You can ask about trash pickup, potholes, parking permits, or office hours, or type agent to reach a person.'],
+    },
+  ]));
+  expect(rows).toHaveLength(6);
+  const records = JSON.stringify(recordResources);
+  expect(records).not.toContain('en-US');
   expect(records).not.toContain('es-US');
   expect(records).not.toContain('Gracias');
-  expect(records).not.toContain('Question');
 
   const flow = contactFlow(template, 'HarborRidge311-Main');
   expect(flow.Properties.Type).toBe('CONTACT_FLOW');
@@ -115,23 +156,41 @@ test('ConnectStack looks up the English prompts and associates the sandbox numbe
   expect(JSON.stringify(content)).not.toContain('español');
   expect(JSON.stringify(content)).not.toContain('$.Attributes.language');
 
-  expect(JSON.stringify(flow.Properties.Content)).toContain('Prompts');
+  expect(JSON.stringify(flow.Properties.Content)).toContain('PromptsByChannel');
+  expect(JSON.stringify(flow.Properties.Content)).toContain('$.Channel');
   const lookup = content.Actions.find((action) => action.Type === 'EvaluateDataTableValues');
-  expect(lookup?.Parameters?.Queries?.[0].QueryName).toBe('Prompts');
-  expect(lookup?.Parameters?.Queries?.[0].Attributes).toEqual(['Greeting', 'Goodbye']);
-  expect(lookup?.Parameters?.Queries?.[0].PrimaryValues).toEqual([
-    { AttributeName: 'Language', Value: '$.LanguageCode' },
-  ]);
+  expect(lookup?.Parameters?.Queries).toEqual(['Greeting', 'Goodbye', 'Question'].map((prompt) => ({
+    QueryName: prompt,
+    Attributes: ['Text'],
+    PrimaryValues: [
+      { AttributeName: 'Prompt', Value: prompt },
+      { AttributeName: 'Channel', Value: '$.Channel' },
+    ],
+  })));
+  expect(lookup?.Transitions?.NextAction).toBe('play-greeting');
   expect(lookup?.Transitions?.Errors?.[0].NextAction).toBe('play-fallback');
 
   const greeting = content.Actions.find((action) => action.Identifier === 'play-greeting');
   const goodbye = content.Actions.find((action) => action.Identifier === 'play-goodbye');
-  expect(greeting?.Parameters?.Text).toBe('$.DataTables.Prompts.Greeting');
-  expect(goodbye?.Parameters?.Text).toBe('$.DataTables.Prompts.Goodbye');
+  expect(greeting?.Parameters?.Text).toBe('$.DataTables.Greeting.Text');
+  expect(greeting?.Transitions?.Errors?.[0].NextAction).toBe('play-fallback');
+  expect(goodbye?.Parameters?.Text).toBe('$.DataTables.Goodbye.Text');
+  expect(content.Actions.some((action) => action.Identifier === 'check-prompt')).toBe(false);
+  expect(content.Actions.some((action) => action.Identifier === 'set-en-language')).toBe(false);
+  expect(JSON.stringify(content)).not.toContain('LanguageCode');
+  expect(content.Actions.some((action) => action.Identifier === 'branch-channel')).toBe(false);
+  expect(content.Actions.some((action) => action.Identifier === 'set-chat-prompts')).toBe(false);
+  expect(content.Actions.find((action) => action.Identifier === 'set-en-voice')?.Transitions?.NextAction)
+    .toBe('lookup-prompts');
+  const synthesized = JSON.stringify(content);
+  expect(synthesized).not.toContain('Welcome to Harbor Ridge 311 chat');
+  expect(synthesized).not.toContain('Say agent');
+  expect(synthesized).not.toContain('$.Attributes.greeting');
+  expect(synthesized).toContain('Thank you for calling Harbor Ridge 3 1 1. This line is a demo.');
   expect(content.Actions.find((action) => action.Identifier === 'set-en-voice')?.Parameters?.TextToSpeechVoice)
     .toBe('Joanna');
   expect(content.Actions.find((action) => action.Identifier === 'enable-flow-logging')?.Transitions?.NextAction)
-    .toBe('set-en-language');
+    .toBe('set-en-voice');
   expect(content.Actions.map((action) => action.Identifier).every((id) => content.Metadata.ActionMetadata[id]?.position))
     .toBe(true);
   const recordIds = Object.keys(template.findResources('AWS::Connect::DataTableRecord'));
@@ -515,9 +574,7 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
   expect(session?.Transitions?.Errors?.[0].NextAction).toBe('play-goodbye');
   expect(content.Actions.some((action) => action.Identifier === 'check-question-language')).toBe(false);
   expect(content.Actions.some((action) => action.Identifier === 'ask-es-question')).toBe(false);
-  expect(lexBots.map((action) => action.Parameters?.Text)).toEqual([
-    'What can I help you with? You can ask about trash pickup, potholes, parking permits, or office hours. Say agent if you would rather talk to a person.',
-  ]);
+  expect(lexBots.map((action) => action.Parameters?.Text)).toEqual(['$.DataTables.Question.Text']);
   expect(lexBots.every((action) => action.Parameters?.LexV2Bot?.AliasArn === 'token')).toBe(true);
   expect(JSON.stringify(lexBots)).toContain('"x-amz-lex:q-in-connect:session-arn":"$.Wisdom.SessionArn"');
   expect(lexBots).toHaveLength(1);
@@ -632,14 +689,8 @@ test('ConnectStack records an after-hours voicemail when the office is closed', 
   const logging = main.Actions.find((action) => action.Identifier === 'enable-flow-logging');
   const hoursCheck = main.Actions.find((action) => action.Identifier === 'check-hours');
   expect(main.StartAction).toBe('enable-flow-logging');
-  expect(logging?.Transitions?.NextAction).toBe('set-en-language');
-  const beforeLanguage: string[] = [];
-  let cursor: string | undefined = main.StartAction;
-  while (cursor && cursor !== 'set-en-language') {
-    beforeLanguage.push(cursor);
-    cursor = main.Actions.find((action) => action.Identifier === cursor)?.Transitions?.NextAction;
-  }
-  expect(beforeLanguage).toEqual(['enable-flow-logging']);
+  expect(logging?.Transitions?.NextAction).toBe('set-en-voice');
+  expect(main.Actions.some((action) => action.Identifier === 'set-en-language')).toBe(false);
   expect(hoursCheck?.Type).toBe('CheckHoursOfOperation');
   expect(hoursCheck?.Transitions?.Conditions?.find((branch) => branch.Condition.Operands[0] === 'True')?.NextAction)
     .toBe('play-agent-placeholder');
@@ -654,12 +705,13 @@ test('ConnectStack records an after-hours voicemail when the office is closed', 
   expect(placeholder?.Parameters?.Text).toBe('This is where we would escalate to an agent.');
   expect(placeholder?.Transitions?.NextAction).toBe('disconnect');
   expect(main.Actions.find((action) => action.Identifier === 'transfer-after-hours')?.Type).toBe('TransferToFlow');
-  expect(main.Actions.find((action) => action.Identifier === 'set-en-language')?.Transitions?.NextAction)
-    .toBe('set-en-voice');
+  expect(main.Actions.find((action) => action.Identifier === 'set-en-voice')?.Transitions?.NextAction)
+    .toBe('lookup-prompts');
   expect(main.Actions.some((action) => action.Identifier === 'select-language')).toBe(false);
 
   const afterHours = contactFlow(template, 'HarborRidge311-AfterHours');
   expect(afterHours.Properties.Type).toBe('CONTACT_FLOW');
+  expect(JSON.stringify(afterHours.Properties.Content)).not.toContain('DataTable');
   const closed = flowDocument(afterHours.Properties.Content);
   expect(closed.Actions.map((action) => action.Identifier).every((id) => closed.Metadata.ActionMetadata[id]?.position))
     .toBe(true);
