@@ -20,7 +20,6 @@ const allowedErrors: Record<string, readonly string[]> = {
   ShowView: ['NoMatchingError', 'NoMatchingCondition', 'TimeLimitExceeded'],
   Wait: ['NoMatchingError'],
   MessageParticipantIteratively: ['NoMatchingError'],
-  CreateCustomerProfile: ['NoMatchingError'],
   CreateCase: ['ContactNotLinked', 'NoMatchingError'],
   GetCase: ['NoMatchingError', 'NoneFound', 'MultipleFound', 'ContactNotLinked'],
 };
@@ -244,7 +243,7 @@ test('in-hours escalation sets the agent guide before transferring to the queue'
   expect(block('check-hours').Parameters.HoursOfOperationId).toBe('hours');
   expect(block('check-hours').Transitions.NextAction).toBe('set-event-flow');
   expect(next('check-hours', 'True')).toBe('set-event-flow');
-  expect(next('check-hours', 'False')).toBe('create-profile');
+  expect(next('check-hours', 'False')).toBe('check-case-title');
   expect(block('set-escalation').Transitions.NextAction).toBe('check-hours');
   expect(next('check-tool', 'Escalate')).toBe('set-escalation');
   expect(block('set-event-flow')).toMatchObject({
@@ -315,27 +314,27 @@ test('after-hours escalation creates a case, speaks the reference, and disconnec
     }
     return found;
   };
-  const closed = reachable(flow, 'create-profile');
+  const closed = reachable(flow, 'check-case-title');
   const open = reachable(flow, 'set-event-flow');
 
   expect(closed.has('disconnect')).toBe(true);
   expect(closed.has('play-closed')).toBe(true);
   expect(closed.has('create-case')).toBe(true);
+  expect(closed.has('create-case-other')).toBe(true);
   expect(closed.has('get-case')).toBe(true);
-  expect(closed.has('play-case-reference')).toBe(true);
+  expect(closed.has('check-reference')).toBe(true);
+  expect(closed.has('play-case-chat')).toBe(true);
+  expect(closed.has('play-case-voice')).toBe(true);
   expect(closed.has('transfer-to-queue')).toBe(false);
   expect(closed.has('set-event-flow')).toBe(false);
-  expect(open.has('create-profile')).toBe(false);
+  expect(open.has('check-case-title')).toBe(false);
   expect(open.has('create-case')).toBe(false);
+  expect(flow.Actions.some((action) => action.Identifier === 'create-profile')).toBe(false);
 
-  expect(block('create-profile').Transitions.Errors).toEqual([
-    { ErrorType: 'NoMatchingError', NextAction: 'play-closed' },
-  ]);
-  expect(block('create-case').Parameters).toMatchObject({
+  expect(block('create-case').Parameters).toEqual({
     LinkContactToCase: 'true',
     CaseTemplateId: 'template',
     CaseRequestFields: {
-      customer_id: '$.Customer.ProfileARN',
       title: '$.Attributes.caseTitle',
       summary: '$.Attributes.escalationSummary',
       case_reason: '$.Attributes.escalationReason',
@@ -343,16 +342,61 @@ test('after-hours escalation creates a case, speaks the reference, and disconnec
       status: 'open',
     },
   });
-  expect(block('create-case').Transitions.Errors?.every((error) => error.NextAction === 'play-closed')).toBe(true);
-  expect(block('get-case').Parameters).toMatchObject({
+  expect(block('create-case').Transitions.Errors).toEqual([
+    { ErrorType: 'ContactNotLinked', NextAction: 'create-case-other' },
+    { ErrorType: 'NoMatchingError', NextAction: 'create-case-other' },
+  ]);
+  expect(block('create-case-other').Parameters).toEqual({
+    LinkContactToCase: 'true',
+    CaseTemplateId: 'template',
+    CaseRequestFields: {
+      title: '$.Attributes.caseTitle',
+      summary: '$.Attributes.escalationSummary',
+      case_reason: 'other',
+      '137be1e8-7eac-4741-9a3b-18aedbdcf77b': 'other',
+      status: 'open',
+    },
+  });
+  expect(block('create-case-other').Transitions.NextAction).toBe('get-case');
+  expect(block('create-case-other').Transitions.Errors).toEqual([
+    { ErrorType: 'ContactNotLinked', NextAction: 'play-closed' },
+    { ErrorType: 'NoMatchingError', NextAction: 'play-closed' },
+  ]);
+  expect(block('get-case').Parameters).toEqual({
     LinkContactToCase: 'false',
     GetLastUpdatedCase: 'true',
-    CustomerId: '$.Customer.ProfileARN',
+    CaseRequestFields: { case_id: '$.Case.case_id' },
     CaseResponseFields: ['reference_number'],
   });
   expect(block('get-case').Transitions.Errors?.every((error) => error.NextAction === 'play-closed')).toBe(true);
-  expect(block('play-case-reference').Parameters.Text).toBe('$.DataTables.AfterHoursCase.Text');
-  expect(block('play-case-reference').Transitions.NextAction).toBe('disconnect');
+  expect(block('lookup-after-hours-case').Parameters.Queries).toEqual([{
+    QueryName: 'AfterHoursCase',
+    Attributes: ['Text', 'TextAfter'],
+    PrimaryValues: [
+      { AttributeName: 'Prompt', Value: 'AfterHoursCase' },
+      { AttributeName: 'Channel', Value: '$.Channel' },
+    ],
+  }]);
+  expect(block('check-reference').Parameters.ComparisonValue).toBe('$.Case.reference_number');
+  expect(block('check-reference').Transitions.Conditions?.[0]).toMatchObject({
+    NextAction: 'branch-case-channel',
+    Condition: { Operator: 'Exists', Operands: [] },
+  });
+  expect(block('check-reference').Transitions.NextAction).toBe('play-closed');
+  expect(block('branch-case-channel').Transitions.Conditions?.[0]).toMatchObject({
+    NextAction: 'play-case-chat',
+    Condition: { Operator: 'Equals', Operands: ['CHAT'] },
+  });
+  expect(block('branch-case-channel').Transitions.NextAction).toBe('play-case-voice');
+  expect(block('play-case-chat').Parameters).toEqual({
+    Text: '$.DataTables.AfterHoursCase.Text $.Case.reference_number. $.DataTables.AfterHoursCase.TextAfter',
+  });
+  expect(block('play-case-chat').Transitions.NextAction).toBe('disconnect');
+  expect(block('play-case-voice').Parameters).toEqual({
+    SSML: '<speak>$.DataTables.AfterHoursCase.Text <say-as interpret-as="digits">$.Case.reference_number</say-as>. $.DataTables.AfterHoursCase.TextAfter</speak>',
+  });
+  expect(block('play-case-voice').Transitions.NextAction).toBe('disconnect');
+  expect(block('play-case-voice').Transitions.Errors?.[0].NextAction).toBe('play-closed');
   expect(block('play-closed').Parameters.Text).toBe(AFTER_HOURS_CLOSED_TEXT);
   expect(block('play-closed').Transitions).toMatchObject({
     NextAction: 'disconnect',

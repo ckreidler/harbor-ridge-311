@@ -17,7 +17,12 @@ import * as cdk from 'aws-cdk-lib/core';
 import * as cr from 'aws-cdk-lib/custom-resources';
 import { Construct } from 'constructs';
 import { escalationGuideFlow } from './flows/escalation-guide-flow';
-import { AFTER_HOURS_CASE_CHAT_TEXT, AFTER_HOURS_CASE_VOICE_TEXT, mainFlow } from './flows/main-flow';
+import {
+  AFTER_HOURS_CASE_CHAT_TEXT,
+  AFTER_HOURS_CASE_TEXT_AFTER,
+  AFTER_HOURS_CASE_VOICE_TEXT,
+  mainFlow,
+} from './flows/main-flow';
 import { customerQueueFlow, QUEUE_CHAT_TEXT, QUEUE_VOICE_TEXT } from './flows/queue-flow';
 import { ORCHESTRATION_MODEL_ID, orchestrationPrompt } from './orchestration-prompt';
 import { SELF_SERVICE_USE_CASE } from './select-orchestrator';
@@ -303,6 +308,12 @@ export class ConnectStack extends cdk.Stack {
       name: 'Text',
       valueType: 'TEXT',
     });
+    const textAfterAttribute = new connect.CfnDataTableAttribute(this, 'TextAfterAttribute', {
+      instanceArn,
+      dataTableArn: prompts.attrArn,
+      name: 'TextAfter',
+      valueType: 'TEXT',
+    });
     const promptRows = [
       ['Greeting', 'VOICE', 'Thank you for calling Harbor Ridge 3 1 1. This line is a demo.'],
       ['Greeting', 'CHAT', 'Welcome to Harbor Ridge 311 chat. This is a demo.'],
@@ -310,11 +321,11 @@ export class ConnectStack extends cdk.Stack {
       ['Goodbye', 'CHAT', 'Thanks for chatting with Harbor Ridge 311. Goodbye.'],
       ['Question', 'VOICE', 'What can I help you with? You can ask about trash pickup, potholes, parking permits, or office hours. Say agent if you would rather talk to a person.'],
       ['Question', 'CHAT', 'What can I help you with? You can ask about trash pickup, potholes, parking permits, or office hours, or type agent to reach a person.'],
-      ['AfterHoursCase', 'CHAT', AFTER_HOURS_CASE_CHAT_TEXT],
-      ['AfterHoursCase', 'VOICE', AFTER_HOURS_CASE_VOICE_TEXT],
+      ['AfterHoursCase', 'CHAT', AFTER_HOURS_CASE_CHAT_TEXT, AFTER_HOURS_CASE_TEXT_AFTER],
+      ['AfterHoursCase', 'VOICE', AFTER_HOURS_CASE_VOICE_TEXT, AFTER_HOURS_CASE_TEXT_AFTER],
       ['Queue', 'CHAT', QUEUE_CHAT_TEXT],
       ['Queue', 'VOICE', QUEUE_VOICE_TEXT],
-    ].map(([prompt, channel, text]) => new connect.CfnDataTableRecord(this, `${prompt}${channel}`, {
+    ].map(([prompt, channel, text, textAfter]) => new connect.CfnDataTableRecord(this, `${prompt}${channel}`, {
       instanceArn,
       dataTableArn: prompts.attrArn,
       dataTableRecord: {
@@ -322,9 +333,12 @@ export class ConnectStack extends cdk.Stack {
           { attributeId: promptAttribute.attrAttributeId, attributeValue: prompt },
           { attributeId: channelAttribute.attrAttributeId, attributeValue: channel },
         ],
-        values: [
-          { attributeId: textAttribute.attrAttributeId, attributeValue: text },
-        ],
+        values: textAfter === undefined
+          ? [{ attributeId: textAttribute.attrAttributeId, attributeValue: text }]
+          : [
+            { attributeId: textAttribute.attrAttributeId, attributeValue: text },
+            { attributeId: textAfterAttribute.attrAttributeId, attributeValue: textAfter },
+          ],
       },
     }));
 

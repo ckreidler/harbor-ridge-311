@@ -3,7 +3,12 @@ import * as path from 'node:path';
 import { Template } from 'aws-cdk-lib/assertions';
 import * as cdk from 'aws-cdk-lib/core';
 import { ConnectStack, CUSTOMER_QUEUE_PROMPT_ID, REQUEST_CATEGORY_FIELD_ID } from '../lib/connect-stack';
-import { AFTER_HOURS_CASE_CHAT_TEXT, AFTER_HOURS_CASE_VOICE_TEXT, AFTER_HOURS_CLOSED_TEXT } from '../lib/flows/main-flow';
+import {
+  AFTER_HOURS_CASE_CHAT_TEXT,
+  AFTER_HOURS_CASE_TEXT_AFTER,
+  AFTER_HOURS_CASE_VOICE_TEXT,
+  AFTER_HOURS_CLOSED_TEXT,
+} from '../lib/flows/main-flow';
 import { QUEUE_CHAT_TEXT, QUEUE_VOICE_TEXT } from '../lib/flows/queue-flow';
 
 interface FlowCondition {
@@ -16,6 +21,7 @@ interface FlowAction {
   Type: string;
   Parameters?: {
     Text?: string;
+    SSML?: string;
     TextToSpeechVoice?: string;
     InputTimeLimitSeconds?: string;
     WisdomAssistantArn?: string;
@@ -86,7 +92,7 @@ test('ConnectStack looks up the English prompts and associates the sandbox numbe
 
   template.resourceCountIs('AWS::Connect::ContactFlow', 3);
   template.resourceCountIs('AWS::Connect::DataTable', 1);
-  template.resourceCountIs('AWS::Connect::DataTableAttribute', 3);
+  template.resourceCountIs('AWS::Connect::DataTableAttribute', 4);
   template.resourceCountIs('AWS::Connect::DataTableRecord', 10);
 
   template.hasResourceProperties('AWS::Connect::DataTable', {
@@ -114,6 +120,8 @@ test('ConnectStack looks up the English prompts and associates the sandbox numbe
   expect(attributeByName.Channel).toMatchObject({ Primary: true, ValueType: 'TEXT' });
   expect(attributeByName.Text).toMatchObject({ ValueType: 'TEXT' });
   expect(attributeByName.Text.Primary).toBeUndefined();
+  expect(attributeByName.TextAfter).toMatchObject({ ValueType: 'TEXT' });
+  expect(attributeByName.TextAfter.Primary).toBeUndefined();
   expect(attributeByName.Language).toBeUndefined();
 
   const recordResources = template.findResources('AWS::Connect::DataTableRecord') as Record<string, {
@@ -141,8 +149,8 @@ test('ConnectStack looks up the English prompts and associates the sandbox numbe
       key: ['CHAT', 'Question'],
       text: ['What can I help you with? You can ask about trash pickup, potholes, parking permits, or office hours, or type agent to reach a person.'],
     },
-    { key: ['AfterHoursCase', 'CHAT'], text: [AFTER_HOURS_CASE_CHAT_TEXT] },
-    { key: ['AfterHoursCase', 'VOICE'], text: [AFTER_HOURS_CASE_VOICE_TEXT] },
+    { key: ['AfterHoursCase', 'CHAT'], text: [AFTER_HOURS_CASE_CHAT_TEXT, AFTER_HOURS_CASE_TEXT_AFTER] },
+    { key: ['AfterHoursCase', 'VOICE'], text: [AFTER_HOURS_CASE_VOICE_TEXT, AFTER_HOURS_CASE_TEXT_AFTER] },
     { key: ['CHAT', 'Queue'], text: [QUEUE_CHAT_TEXT] },
     { key: ['Queue', 'VOICE'], text: [QUEUE_VOICE_TEXT] },
   ]));
@@ -709,10 +717,10 @@ test('ConnectStack opens an after-hours case and removes voicemail', () => {
   expect(hoursCheck?.Transitions?.Conditions?.find((branch) => branch.Condition.Operands[0] === 'True')?.NextAction)
     .toBe('set-event-flow');
   expect(hoursCheck?.Transitions?.Conditions?.find((branch) => branch.Condition.Operands[0] === 'False')?.NextAction)
-    .toBe('create-profile');
+    .toBe('check-case-title');
   expect(hoursCheck?.Transitions?.Errors?.[0]).toEqual({
     ErrorType: 'NoMatchingError',
-    NextAction: 'create-profile',
+    NextAction: 'check-case-title',
   });
   expect(main.Actions.some((action) => action.Identifier === 'play-agent-placeholder')).toBe(false);
   expect(main.Actions.some((action) => action.Identifier === 'transfer-after-hours')).toBe(false);
@@ -723,14 +731,8 @@ test('ConnectStack opens an after-hours case and removes voicemail', () => {
   expect(Object.keys(template.findResources('AWS::Connect::ContactFlow')).some((id) => id.startsWith('AfterHours')))
     .toBe(false);
 
-  expect(block('create-profile')).toMatchObject({
-    Type: 'CreateCustomerProfile',
-    Parameters: { ProfileRequestData: {} },
-    Transitions: {
-      NextAction: 'check-case-title',
-      Errors: [{ ErrorType: 'NoMatchingError', NextAction: 'play-closed' }],
-    },
-  });
+  expect(main.Actions.some((action) => action.Identifier === 'create-profile')).toBe(false);
+  expect(main.Actions.some((action) => action.Type === 'CreateCustomerProfile')).toBe(false);
   expect(block('check-case-title').Parameters?.ComparisonValue).toBe('$.Attributes.customerIntent');
   expect(block('check-case-title').Transitions?.Conditions?.[0]).toMatchObject({
     NextAction: 'set-case-title',
@@ -746,7 +748,8 @@ test('ConnectStack opens an after-hours case and removes voicemail', () => {
   expect(block('create-case').Type).toBe('CreateCase');
   expect(createCase).toContain('"LinkContactToCase":"true"');
   expect(createCase).toContain('"CaseTemplateId":"token"');
-  expect(createCase).toContain('"customer_id":"$.Customer.ProfileARN"');
+  expect(createCase).not.toContain('customer_id');
+  expect(createCase).not.toContain('ProfileARN');
   expect(createCase).toContain('"title":"$.Attributes.caseTitle"');
   expect(createCase).toContain('"summary":"$.Attributes.escalationSummary"');
   expect(createCase).toContain('"case_reason":"$.Attributes.escalationReason"');
@@ -754,16 +757,30 @@ test('ConnectStack opens an after-hours case and removes voicemail', () => {
   expect(createCase).toContain('"status":"open"');
   expect(block('create-case').Transitions?.NextAction).toBe('get-case');
   expect(block('create-case').Transitions?.Errors).toEqual([
+    { ErrorType: 'ContactNotLinked', NextAction: 'create-case-other' },
+    { ErrorType: 'NoMatchingError', NextAction: 'create-case-other' },
+  ]);
+  const retryCase = JSON.stringify(block('create-case-other'));
+  expect(block('create-case-other').Type).toBe('CreateCase');
+  expect(retryCase).toContain('"case_reason":"other"');
+  expect(retryCase).toContain('"title":"$.Attributes.caseTitle"');
+  expect(retryCase).toContain('"summary":"$.Attributes.escalationSummary"');
+  expect(retryCase).toContain(`"${REQUEST_CATEGORY_FIELD_ID}":"other"`);
+  expect(retryCase).toContain('"status":"open"');
+  expect(retryCase).not.toContain('escalationReason');
+  expect(block('create-case-other').Transitions?.NextAction).toBe('get-case');
+  expect(block('create-case-other').Transitions?.Errors).toEqual([
     { ErrorType: 'ContactNotLinked', NextAction: 'play-closed' },
     { ErrorType: 'NoMatchingError', NextAction: 'play-closed' },
   ]);
 
-  const getCase = JSON.stringify(block('get-case'));
   expect(block('get-case').Type).toBe('GetCase');
-  expect(getCase).toContain('"GetLastUpdatedCase":"true"');
-  expect(getCase).toContain('"CustomerId":"$.Customer.ProfileARN"');
-  expect(getCase).toContain('"case_id":"$.Case.case_id"');
-  expect(getCase).toContain('"CaseResponseFields":["reference_number"]');
+  expect(block('get-case').Parameters).toEqual({
+    LinkContactToCase: 'false',
+    GetLastUpdatedCase: 'true',
+    CaseRequestFields: { case_id: '$.Case.case_id' },
+    CaseResponseFields: ['reference_number'],
+  });
   expect(block('get-case').Transitions?.NextAction).toBe('lookup-after-hours-case');
   for (const error of block('get-case').Transitions?.Errors ?? []) {
     expect(error.NextAction).toBe('play-closed');
@@ -771,19 +788,33 @@ test('ConnectStack opens an after-hours case and removes voicemail', () => {
 
   expect(block('lookup-after-hours-case').Parameters?.Queries).toEqual([{
     QueryName: 'AfterHoursCase',
-    Attributes: ['Text'],
+    Attributes: ['Text', 'TextAfter'],
     PrimaryValues: [
       { AttributeName: 'Prompt', Value: 'AfterHoursCase' },
       { AttributeName: 'Channel', Value: '$.Channel' },
     ],
   }]);
   expect(block('check-case-prompt').Transitions?.Conditions?.[0]).toMatchObject({
-    NextAction: 'play-case-reference',
+    NextAction: 'check-reference',
     Condition: { Operator: 'Exists', Operands: [] },
   });
-  expect(block('play-case-reference').Parameters?.Text).toBe('$.DataTables.AfterHoursCase.Text');
-  expect(block('play-case-reference').Transitions?.NextAction).toBe('disconnect');
-  expect(block('play-case-reference').Transitions?.Errors?.[0].NextAction).toBe('play-closed');
+  expect(block('check-reference').Parameters?.ComparisonValue).toBe('$.Case.reference_number');
+  expect(block('check-reference').Transitions?.Conditions?.[0]).toMatchObject({
+    NextAction: 'branch-case-channel',
+    Condition: { Operator: 'Exists', Operands: [] },
+  });
+  expect(block('check-reference').Transitions?.NextAction).toBe('play-closed');
+  expect(block('play-case-chat').Parameters?.Text).toBe(
+    '$.DataTables.AfterHoursCase.Text $.Case.reference_number. $.DataTables.AfterHoursCase.TextAfter',
+  );
+  expect(block('play-case-chat').Parameters?.SSML).toBeUndefined();
+  expect(block('play-case-chat').Transitions?.NextAction).toBe('disconnect');
+  expect(block('play-case-voice').Parameters?.SSML).toBe(
+    '<speak>$.DataTables.AfterHoursCase.Text <say-as interpret-as="digits">$.Case.reference_number</say-as>. $.DataTables.AfterHoursCase.TextAfter</speak>',
+  );
+  expect(block('play-case-voice').Parameters?.Text).toBeUndefined();
+  expect(block('play-case-voice').Transitions?.NextAction).toBe('disconnect');
+  expect(block('play-case-voice').Transitions?.Errors?.[0].NextAction).toBe('play-closed');
   expect(block('play-closed').Parameters?.Text).toBe(AFTER_HOURS_CLOSED_TEXT);
   expect(block('play-closed').Transitions?.NextAction).toBe('disconnect');
   expect(JSON.stringify(main)).not.toContain('Voicemail');
