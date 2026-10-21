@@ -3,6 +3,8 @@ import * as path from 'node:path';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import * as cdk from 'aws-cdk-lib/core';
 import { ConnectStack, VOICEMAIL_RECORDING_KEY_PATTERN } from '../lib/connect-stack';
+import { AFTER_HOURS_CHAT_TEXT } from '../lib/flows/after-hours-flow';
+import { QUEUE_CHAT_TEXT, QUEUE_VOICE_TEXT } from '../lib/flows/queue-flow';
 
 interface FlowCondition {
   NextAction: string;
@@ -82,10 +84,10 @@ test('ConnectStack looks up the English prompts and associates the sandbox numbe
   const app = new cdk.App();
   const template = Template.fromStack(new ConnectStack(app, 'ConnectStack'));
 
-  template.resourceCountIs('AWS::Connect::ContactFlow', 3);
+  template.resourceCountIs('AWS::Connect::ContactFlow', 4);
   template.resourceCountIs('AWS::Connect::DataTable', 1);
   template.resourceCountIs('AWS::Connect::DataTableAttribute', 3);
-  template.resourceCountIs('AWS::Connect::DataTableRecord', 6);
+  template.resourceCountIs('AWS::Connect::DataTableRecord', 9);
 
   template.hasResourceProperties('AWS::Connect::DataTable', {
     Name: 'HarborRidge311-PromptsByChannel',
@@ -139,8 +141,12 @@ test('ConnectStack looks up the English prompts and associates the sandbox numbe
       key: ['CHAT', 'Question'],
       text: ['What can I help you with? You can ask about trash pickup, potholes, parking permits, or office hours, or type agent to reach a person.'],
     },
+    { key: ['AfterHours', 'CHAT'], text: [AFTER_HOURS_CHAT_TEXT] },
+    { key: ['CHAT', 'Queue'], text: [QUEUE_CHAT_TEXT] },
+    { key: ['Queue', 'VOICE'], text: [QUEUE_VOICE_TEXT] },
   ]));
-  expect(rows).toHaveLength(6);
+  expect(rows).toHaveLength(9);
+  expect(rows.some((row) => row.key.includes('AfterHours') && row.key.includes('VOICE'))).toBe(false);
   const records = JSON.stringify(recordResources);
   expect(records).not.toContain('en-US');
   expect(records).not.toContain('es-US');
@@ -708,8 +714,8 @@ test('ConnectStack records an after-hours voicemail when the office is closed', 
 
   const afterHours = contactFlow(template, 'HarborRidge311-AfterHours');
   expect(afterHours.Properties.Type).toBe('CONTACT_FLOW');
-  expect(JSON.stringify(afterHours.Properties.Content)).not.toContain('DataTable');
   const closed = flowDocument(afterHours.Properties.Content);
+  expect(closed.StartAction).toBe('branch-channel');
   expect(closed.Actions.map((action) => action.Identifier).every((id) => closed.Metadata.ActionMetadata[id]?.position))
     .toBe(true);
   const recording = closed.Actions.find((action) => action.Identifier === 'start-recording');
@@ -1040,9 +1046,25 @@ test('ConnectStack transfers an in-hours escalation and keeps the agent password
   expect(main.Actions.find((action) => action.Identifier === 'set-event-flow')?.Transitions?.NextAction)
     .toBe('set-working-queue');
   expect(main.Actions.find((action) => action.Identifier === 'set-working-queue')?.Transitions?.NextAction)
+    .toBe('set-customer-queue');
+  expect(main.Actions.find((action) => action.Identifier === 'set-customer-queue')?.Type)
+    .toBe('UpdateContactEventHooks');
+  expect(main.Actions.find((action) => action.Identifier === 'set-customer-queue')?.Transitions?.NextAction)
     .toBe('transfer-to-queue');
+  expect(main.Actions.find((action) => action.Identifier === 'set-customer-queue')?.Transitions?.Errors?.[0])
+    .toEqual({ ErrorType: 'NoMatchingError', NextAction: 'transfer-to-queue' });
   expect(main.Actions.find((action) => action.Identifier === 'transfer-to-queue')?.Type)
     .toBe('TransferContactToQueue');
+  const queueFlow = contactFlow(template, 'HarborRidge311-Queue');
+  expect(queueFlow.Properties.Type).toBe('CUSTOMER_QUEUE');
+  const queueDocument = flowDocument(queueFlow.Properties.Content);
+  expect(queueDocument.StartAction).toBe('branch-channel');
+  expect(queueDocument.Actions.some((action) => action.Identifier === 'loop-hold' && action.Type === 'MessageParticipantIteratively'))
+    .toBe(true);
+  expect(queueDocument.Actions.some((action) => action.Identifier === 'wait-in-queue' && action.Type === 'Wait'))
+    .toBe(true);
+  expect(mainRaw).toContain('CustomerQueue');
+  expect(mainRaw).toContain('QueueFlow');
 
   const guideRaw = JSON.stringify(contactFlow(template, 'HarborRidge311-EscalationGuide').Properties.Content);
   expect(guideRaw).toContain('ShowView');

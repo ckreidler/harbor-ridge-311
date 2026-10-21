@@ -21,9 +21,10 @@ import * as wisdom from 'aws-cdk-lib/aws-wisdom';
 import * as cdk from 'aws-cdk-lib/core';
 import * as cr from 'aws-cdk-lib/custom-resources';
 import { Construct } from 'constructs';
-import { afterHoursFlow } from './flows/after-hours-flow';
+import { AFTER_HOURS_CHAT_TEXT, afterHoursFlow } from './flows/after-hours-flow';
 import { escalationGuideFlow } from './flows/escalation-guide-flow';
 import { mainFlow } from './flows/main-flow';
+import { customerQueueFlow, QUEUE_CHAT_TEXT, QUEUE_VOICE_TEXT } from './flows/queue-flow';
 import { ORCHESTRATION_MODEL_ID, orchestrationPrompt } from './orchestration-prompt';
 import { SELF_SERVICE_USE_CASE } from './select-orchestrator';
 
@@ -268,6 +269,9 @@ export class ConnectStack extends cdk.Stack {
       ['Goodbye', 'CHAT', 'Thanks for chatting with Harbor Ridge 311. Goodbye.'],
       ['Question', 'VOICE', 'What can I help you with? You can ask about trash pickup, potholes, parking permits, or office hours. Say agent if you would rather talk to a person.'],
       ['Question', 'CHAT', 'What can I help you with? You can ask about trash pickup, potholes, parking permits, or office hours, or type agent to reach a person.'],
+      ['AfterHours', 'CHAT', AFTER_HOURS_CHAT_TEXT],
+      ['Queue', 'CHAT', QUEUE_CHAT_TEXT],
+      ['Queue', 'VOICE', QUEUE_VOICE_TEXT],
     ].map(([prompt, channel, text]) => new connect.CfnDataTableRecord(this, `${prompt}${channel}`, {
       instanceArn,
       dataTableArn: prompts.attrArn,
@@ -751,12 +755,28 @@ export class ConnectStack extends cdk.Stack {
       securityProfileArns: [agentSecurityProfile.attrSecurityProfileArn],
     });
 
+    const dataTableId = cdk.Fn.select(3, cdk.Fn.split('/', prompts.attrArn));
     const afterHours = new connect.CfnContactFlow(this, 'AfterHoursFlow', {
       instanceArn,
       name: 'HarborRidge311-AfterHours',
       type: 'CONTACT_FLOW',
-      content: cdk.Fn.toJsonString(afterHoursFlow()),
+      content: cdk.Fn.toJsonString(afterHoursFlow({ dataTableId })),
     });
+    const queueFlow = new connect.CfnContactFlow(this, 'QueueFlow', {
+      instanceArn,
+      name: 'HarborRidge311-Queue',
+      type: 'CUSTOMER_QUEUE',
+      content: cdk.Fn.toJsonString(customerQueueFlow({ dataTableId })),
+    });
+    const promptRow = (id: string) => {
+      const found = promptRows.find((record) => record.node.id === id);
+      if (!found) {
+        throw new Error(`missing prompt row ${id}`);
+      }
+      return found;
+    };
+    afterHours.node.addDependency(promptRow('AfterHoursCHAT'));
+    queueFlow.node.addDependency(promptRow('QueueCHAT'), promptRow('QueueVOICE'));
 
     const escalationGuide = new connect.CfnContactFlow(this, 'EscalationGuide', {
       instanceArn,
@@ -778,7 +798,7 @@ export class ConnectStack extends cdk.Stack {
       name: 'HarborRidge311-Main',
       type: 'CONTACT_FLOW',
       content: cdk.Fn.toJsonString(mainFlow({
-        dataTableId: cdk.Fn.select(3, cdk.Fn.split('/', prompts.attrArn)),
+        dataTableId,
         wisdomAssistantArn: assistantArn,
         lexBotAliasArn: botAlias.attrArn,
         orchestratorLambdaArn: selectOrchestrator.functionArn,
@@ -786,6 +806,7 @@ export class ConnectStack extends cdk.Stack {
         afterHoursFlowArn: afterHours.attrContactFlowArn,
         queueArn: queue.attrQueueArn,
         escalationGuideFlowArn: escalationGuide.attrContactFlowArn,
+        customerQueueFlowArn: queueFlow.attrContactFlowArn,
       })),
     });
     flow.node.addDependency(...promptRows, lexAssociation, orchestratorAssociation);
