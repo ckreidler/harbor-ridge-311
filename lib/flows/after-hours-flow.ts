@@ -5,6 +5,14 @@ interface FlowError {
   NextAction: string;
 }
 
+interface FlowCondition {
+  NextAction: string;
+  Condition: {
+    Operator: 'Equals';
+    Operands: [string];
+  };
+}
+
 interface FlowAction {
   Identifier: string;
   Type: string;
@@ -12,7 +20,7 @@ interface FlowAction {
   Transitions: {
     NextAction?: string;
     Errors?: FlowError[];
-    Conditions?: [];
+    Conditions?: FlowCondition[];
   };
 }
 
@@ -26,28 +34,102 @@ interface ContactFlowContent {
   Actions: FlowAction[];
 }
 
+export interface AfterHoursFlowProps {
+  dataTableId: string;
+}
+
+export const AFTER_HOURS_CHAT_TEXT = 'Harbor Ridge 311 is closed right now. Our team is available Monday to Friday, 8 a.m. to 5 p.m. Pacific. Please chat with us again then.';
+
 const CLOSED_PROMPT = 'Thank you for calling Harbor Ridge 3 1 1. Our office is closed. Please leave a message after the tone, and hang up when you are finished.';
+const CHAT_CLOSED_FALLBACK = 'Harbor Ridge 311 is closed right now.';
 
 function errorTo(nextAction: string): FlowError[] {
   return [{ ErrorType: 'NoMatchingError', NextAction: nextAction }];
 }
 
-export function afterHoursFlow(): ContactFlowContent {
+export function afterHoursFlow(props: AfterHoursFlowProps): ContactFlowContent {
   return {
     Version: '2019-10-30',
-    StartAction: 'set-voice',
+    StartAction: 'branch-channel',
     Metadata: {
       entryPointPosition: { x: 40, y: 40 },
       ActionMetadata: {
-        'set-voice': { position: { x: 180, y: 180 } },
-        'set-voicemail': { position: { x: 430, y: 180 } },
-        'play-closed': { position: { x: 680, y: 180 } },
-        'start-recording': { position: { x: 930, y: 180 } },
-        'leave-message': { position: { x: 1180, y: 180 } },
-        disconnect: { position: { x: 1430, y: 180 } },
+        'branch-channel': { position: { x: 160, y: 40 } },
+        'set-voice': { position: { x: 440, y: 40 } },
+        'set-voicemail': { position: { x: 720, y: 40 } },
+        'play-closed': { position: { x: 1000, y: 40 } },
+        'start-recording': { position: { x: 1280, y: 40 } },
+        'leave-message': { position: { x: 1560, y: 40 } },
+        disconnect: { position: { x: 1840, y: 40 } },
+        'lookup-closed': { position: { x: 440, y: 320 } },
+        'play-closed-chat': { position: { x: 720, y: 320 } },
+        'play-closed-fallback': { position: { x: 1000, y: 320 } },
       },
     },
     Actions: [
+      {
+        Identifier: 'branch-channel',
+        Type: 'Compare',
+        Parameters: {
+          ComparisonValue: '$.Channel',
+        },
+        Transitions: {
+          NextAction: 'set-voice',
+          Conditions: [
+            {
+              NextAction: 'lookup-closed',
+              Condition: { Operator: 'Equals', Operands: ['CHAT'] },
+            },
+          ],
+          Errors: [{ ErrorType: 'NoMatchingCondition', NextAction: 'set-voice' }],
+        },
+      },
+      {
+        Identifier: 'lookup-closed',
+        Type: 'EvaluateDataTableValues',
+        Parameters: {
+          DataTableId: props.dataTableId,
+          Queries: [
+            {
+              QueryName: 'AfterHours',
+              Attributes: ['Text'],
+              PrimaryValues: [
+                { AttributeName: 'Prompt', Value: 'AfterHours' },
+                { AttributeName: 'Channel', Value: '$.Channel' },
+              ],
+            },
+          ],
+        },
+        Transitions: {
+          NextAction: 'play-closed-chat',
+          Errors: errorTo('play-closed-fallback'),
+          Conditions: [],
+        },
+      },
+      {
+        Identifier: 'play-closed-chat',
+        Type: 'MessageParticipant',
+        Parameters: {
+          Text: '$.DataTables.AfterHours.Text',
+        },
+        Transitions: {
+          NextAction: 'disconnect',
+          Errors: errorTo('play-closed-fallback'),
+          Conditions: [],
+        },
+      },
+      {
+        Identifier: 'play-closed-fallback',
+        Type: 'MessageParticipant',
+        Parameters: {
+          Text: CHAT_CLOSED_FALLBACK,
+        },
+        Transitions: {
+          NextAction: 'disconnect',
+          Errors: errorTo('disconnect'),
+          Conditions: [],
+        },
+      },
       {
         Identifier: 'set-voice',
         Type: 'UpdateContactTextToSpeechVoice',

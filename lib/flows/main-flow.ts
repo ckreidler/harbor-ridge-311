@@ -43,6 +43,7 @@ export interface MainFlowProps {
   afterHoursFlowArn: string;
   queueArn: string;
   escalationGuideFlowArn: string;
+  customerQueueFlowArn: string;
 }
 
 const VOICE_GREETING = 'Thank you for calling Harbor Ridge 3 1 1. This line is a demo.';
@@ -84,7 +85,8 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
         'check-hours': { position: { x: 2680, y: 640 } },
         'set-event-flow': { position: { x: 2960, y: 640 } },
         'set-working-queue': { position: { x: 3240, y: 640 } },
-        'transfer-to-queue': { position: { x: 3520, y: 640 } },
+        'set-customer-queue': { position: { x: 3520, y: 640 } },
+        'transfer-to-queue': { position: { x: 3800, y: 640 } },
         'transfer-after-hours': { position: { x: 2960, y: 920 } },
         disconnect: { position: { x: 3240, y: 360 } },
       },
@@ -275,8 +277,22 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
           QueueId: props.queueArn,
         },
         Transitions: {
-          NextAction: 'transfer-to-queue',
+          NextAction: 'set-customer-queue',
           Errors: errorTo('play-goodbye'),
+          Conditions: [],
+        },
+      },
+      {
+        Identifier: 'set-customer-queue',
+        Type: 'UpdateContactEventHooks',
+        Parameters: {
+          EventHooks: {
+            CustomerQueue: props.customerQueueFlowArn,
+          },
+        },
+        Transitions: {
+          NextAction: 'transfer-to-queue',
+          Errors: errorTo('transfer-to-queue'),
           Conditions: [],
         },
       },
