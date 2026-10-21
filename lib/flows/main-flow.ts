@@ -10,6 +10,9 @@ interface FlowCondition {
   Condition: {
     Operator: 'Equals';
     Operands: [string];
+  } | {
+    Operator: 'Exists';
+    Operands: [];
   };
 }
 
@@ -148,15 +151,15 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
           ComparisonValue: '$.DataTables.Greeting.Text',
         },
         Transitions: {
-          NextAction: 'play-greeting',
+          NextAction: 'play-fallback',
           Conditions: [
             {
-              NextAction: 'play-fallback',
-              Condition: { Operator: 'Equals', Operands: [''] },
+              NextAction: 'play-greeting',
+              Condition: { Operator: 'Exists', Operands: [] },
             },
           ],
           Errors: [
-            { ErrorType: 'NoMatchingCondition', NextAction: 'play-greeting' },
+            { ErrorType: 'NoMatchingCondition', NextAction: 'play-fallback' },
           ],
         },
       },

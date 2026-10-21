@@ -177,14 +177,14 @@ test('ConnectStack looks up the English prompts and associates the sandbox numbe
   const found = content.Actions.find((action) => action.Identifier === 'check-prompt');
   expect(found?.Type).toBe('Compare');
   expect(found?.Parameters?.ComparisonValue).toBe('$.DataTables.Greeting.Text');
-  expect(found?.Transitions?.NextAction).toBe('play-greeting');
+  expect(found?.Transitions?.NextAction).toBe('play-fallback');
   expect(found?.Transitions?.Conditions).toEqual([{
-    NextAction: 'play-fallback',
-    Condition: { Operator: 'Equals', Operands: [''] },
+    NextAction: 'play-greeting',
+    Condition: { Operator: 'Exists', Operands: [] },
   }]);
   expect(found?.Transitions?.Errors).toEqual([{
     ErrorType: 'NoMatchingCondition',
-    NextAction: 'play-greeting',
+    NextAction: 'play-fallback',
   }]);
   expect(content.Actions.some((action) => action.Identifier === 'branch-channel')).toBe(false);
   expect(content.Actions.some((action) => action.Identifier === 'set-chat-prompts')).toBe(false);

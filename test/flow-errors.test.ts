@@ -70,6 +70,20 @@ const flowProps = {
   afterHoursFlowArn: 'after-hours',
 };
 
+test('compare conditions do not use an empty-string operand', () => {
+  const flows = [mainFlow(flowProps), afterHoursFlow()];
+  for (const flow of flows) {
+    for (const action of flow.Actions) {
+      if (action.Type !== 'Compare') {
+        continue;
+      }
+      for (const branch of action.Transitions.Conditions ?? []) {
+        expect(branch.Condition.Operands).not.toContain('');
+      }
+    }
+  }
+});
+
 test('main flow looks up prompt text by channel and falls back when the row is missing', () => {
   const flow = mainFlow(flowProps);
   const block = (identifier: string) => {
@@ -108,12 +122,12 @@ test('main flow looks up prompt text by channel and falls back when the row is m
     Type: 'Compare',
     Parameters: { ComparisonValue: '$.DataTables.Greeting.Text' },
     Transitions: {
-      NextAction: 'play-greeting',
+      NextAction: 'play-fallback',
       Conditions: [{
-        NextAction: 'play-fallback',
-        Condition: { Operator: 'Equals', Operands: [''] },
+        NextAction: 'play-greeting',
+        Condition: { Operator: 'Exists', Operands: [] },
       }],
-      Errors: [{ ErrorType: 'NoMatchingCondition', NextAction: 'play-greeting' }],
+      Errors: [{ ErrorType: 'NoMatchingCondition', NextAction: 'play-fallback' }],
     },
   });
   expect(block('play-greeting').Parameters.Text).toBe('$.DataTables.Greeting.Text');
