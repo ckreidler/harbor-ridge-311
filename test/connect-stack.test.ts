@@ -1047,8 +1047,9 @@ test('ConnectStack transfers an in-hours escalation and keeps the agent password
   const guideRaw = JSON.stringify(contactFlow(template, 'HarborRidge311-EscalationGuide').Properties.Content);
   expect(guideRaw).toContain('ShowView');
   expect(guideRaw).toContain('view/detail:1');
+  expect(guideRaw).not.toContain('TemplateString');
   for (const attribute of ['escalationReason', 'escalationSummary', 'customerIntent', 'sentiment']) {
-    expect(guideRaw).toContain(`$.Attributes.${attribute}`);
+    expect(guideRaw.split(`$.Attributes.${attribute}`).length - 1).toBe(1);
   }
   const assistants = JSON.stringify(template.findResources('Custom::AWS'));
   expect(assistants).toContain('ORCHESTRATION');

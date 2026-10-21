@@ -253,7 +253,16 @@ test('in-hours escalation sets the agent guide before transferring to the queue'
   const view = JSON.stringify(show);
   expect(show?.Type).toBe('ShowView');
   expect(view).toContain(detailViewArn);
-  for (const attribute of ['escalationReason', 'escalationSummary', 'customerIntent', 'sentiment']) {
-    expect(view).toContain(`$.Attributes.${attribute}`);
+  expect(view).toContain('Harbor Ridge 311 escalation');
+  expect(view).not.toContain('TemplateString');
+  expect(view).not.toContain('"Sections"');
+  for (const [label, attribute] of [
+    ['Reason', 'escalationReason'],
+    ['Summary', 'escalationSummary'],
+    ['Customer intent', 'customerIntent'],
+    ['Sentiment', 'sentiment'],
+  ]) {
+    expect(view).toContain(`"Label":"${label}"`);
+    expect(view.split(`$.Attributes.${attribute}`).length - 1).toBe(1);
   }
 });

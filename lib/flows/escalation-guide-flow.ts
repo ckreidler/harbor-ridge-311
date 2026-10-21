@@ -30,11 +30,11 @@ export interface EscalationGuideFlowProps {
   detailViewArn: string;
 }
 
-const ESCALATION_ATTRIBUTES = [
-  'escalationReason',
-  'escalationSummary',
-  'customerIntent',
-  'sentiment',
+const ESCALATION_FIELDS = [
+  ['Reason', 'escalationReason'],
+  ['Summary', 'escalationSummary'],
+  ['Customer intent', 'customerIntent'],
+  ['Sentiment', 'sentiment'],
 ] as const;
 
 function errorTo(nextAction: string): FlowError[] {
@@ -46,10 +46,6 @@ function errorTo(nextAction: string): FlowError[] {
 }
 
 export function escalationGuideFlow(props: EscalationGuideFlowProps): ContactFlowContent {
-  const attributes = ESCALATION_ATTRIBUTES.map((name) => ({
-    Label: name,
-    Value: `$.Attributes.${name}`,
-  }));
   return {
     Version: '2019-10-30',
     StartAction: 'show-escalation',
@@ -71,10 +67,9 @@ export function escalationGuideFlow(props: EscalationGuideFlowProps): ContactFlo
           InvocationTimeLimitSeconds: '400',
           ViewData: {
             Heading: 'Harbor Ridge 311 escalation',
-            Description: '$.Attributes.escalationSummary',
-            AttributeBar: attributes,
-            Sections: ESCALATION_ATTRIBUTES.map((name) => ({
-              TemplateString: `$.Attributes.${name}`,
+            AttributeBar: ESCALATION_FIELDS.map(([label, name]) => ({
+              Label: label,
+              Value: `$.Attributes.${name}`,
             })),
             Back: { Label: 'Close' },
           },
