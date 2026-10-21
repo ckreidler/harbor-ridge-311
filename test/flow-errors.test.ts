@@ -322,6 +322,10 @@ test('after-hours escalation creates a case, speaks the reference, and disconnec
   expect(closed.has('create-case')).toBe(true);
   expect(closed.has('create-case-other')).toBe(true);
   expect(closed.has('get-case')).toBe(true);
+  expect(closed.has('get-case-retry')).toBe(true);
+  expect(closed.has('wait-case')).toBe(true);
+  expect(closed.has('play-case-hold-chat')).toBe(true);
+  expect(closed.has('play-case-hold-voice')).toBe(true);
   expect(closed.has('check-reference')).toBe(true);
   expect(closed.has('play-case-chat')).toBe(true);
   expect(closed.has('play-case-voice')).toBe(true);
@@ -343,7 +347,7 @@ test('after-hours escalation creates a case, speaks the reference, and disconnec
     },
   });
   expect(block('create-case').Transitions.Errors).toEqual([
-    { ErrorType: 'ContactNotLinked', NextAction: 'create-case-other' },
+    { ErrorType: 'ContactNotLinked', NextAction: 'get-case' },
     { ErrorType: 'NoMatchingError', NextAction: 'create-case-other' },
   ]);
   expect(block('create-case-other').Parameters).toEqual({
@@ -359,16 +363,55 @@ test('after-hours escalation creates a case, speaks the reference, and disconnec
   });
   expect(block('create-case-other').Transitions.NextAction).toBe('get-case');
   expect(block('create-case-other').Transitions.Errors).toEqual([
-    { ErrorType: 'ContactNotLinked', NextAction: 'play-closed' },
+    { ErrorType: 'ContactNotLinked', NextAction: 'get-case' },
     { ErrorType: 'NoMatchingError', NextAction: 'play-closed' },
   ]);
-  expect(block('get-case').Parameters).toEqual({
+  const getCaseParameters = {
     LinkContactToCase: 'false',
     GetLastUpdatedCase: 'true',
     CaseRequestFields: { case_id: '$.Case.case_id' },
     CaseResponseFields: ['reference_number'],
+  };
+  expect(block('get-case').Parameters).toEqual(getCaseParameters);
+  expect(block('get-case').Transitions.Errors).toEqual([
+    { ErrorType: 'NoMatchingError', NextAction: 'branch-case-hold' },
+    { ErrorType: 'NoneFound', NextAction: 'branch-case-hold' },
+    { ErrorType: 'MultipleFound', NextAction: 'branch-case-hold' },
+  ]);
+  expect(block('branch-case-hold').Transitions.Conditions?.[0]).toMatchObject({
+    NextAction: 'play-case-hold-chat',
+    Condition: { Operator: 'Equals', Operands: ['CHAT'] },
   });
-  expect(block('get-case').Transitions.Errors?.every((error) => error.NextAction === 'play-closed')).toBe(true);
+  expect(block('branch-case-hold').Transitions.NextAction).toBe('play-case-hold-voice');
+  expect(block('play-case-hold-chat').Parameters).toEqual({
+    Text: 'One moment while we log your request.',
+  });
+  expect(block('play-case-hold-chat').Transitions.NextAction).toBe('wait-case');
+  expect(block('wait-case')).toMatchObject({
+    Type: 'Wait',
+    Parameters: { TimeLimitSeconds: '3' },
+    Transitions: {
+      NextAction: 'get-case-retry',
+      Conditions: [
+        {
+          NextAction: 'get-case-retry',
+          Condition: { Operator: 'Equals', Operands: ['WaitCompleted'] },
+        },
+      ],
+    },
+  });
+  expect(block('play-case-hold-voice').Parameters).toEqual({
+    SSML: '<speak>One moment while we log your request.<break time="2s"/></speak>',
+  });
+  expect(block('play-case-hold-voice').Transitions.NextAction).toBe('get-case-retry');
+  expect(reachable(flow, 'play-case-hold-voice').has('wait-case')).toBe(false);
+  expect(block('get-case-retry').Parameters).toEqual(getCaseParameters);
+  expect(block('get-case-retry').Transitions.NextAction).toBe('lookup-after-hours-case');
+  expect(block('get-case-retry').Transitions.Errors).toEqual([
+    { ErrorType: 'NoMatchingError', NextAction: 'play-closed' },
+    { ErrorType: 'NoneFound', NextAction: 'play-closed' },
+    { ErrorType: 'MultipleFound', NextAction: 'play-closed' },
+  ]);
   expect(block('lookup-after-hours-case').Parameters.Queries).toEqual([{
     QueryName: 'AfterHoursCase',
     Attributes: ['Text', 'TextAfter'],
@@ -502,16 +545,21 @@ test('wait actions use TimeLimitSeconds', () => {
   const waits = flows.flatMap((flow) => flow.Actions.filter((action) => action.Type === 'Wait'));
   expect(waits.length).toBeGreaterThan(0);
   for (const wait of waits) {
-    expect(wait.Parameters.TimeLimitSeconds).toBe('180');
-    expect(Object.keys(wait.Parameters)).not.toContain('TimeoutSeconds');
+    expect(typeof wait.Parameters.TimeLimitSeconds).toBe('string');
+    expect(wait.Parameters.TimeLimitSeconds).not.toBe('');
+    expect(Object.keys(wait.Parameters)).toEqual(['TimeLimitSeconds']);
     expect(JSON.stringify(wait)).not.toContain('TimeoutSeconds');
     expect(wait.Transitions.Conditions).toEqual([
       {
-        NextAction: wait.Identifier,
+        NextAction: expect.any(String),
         Condition: { Operator: 'Equals', Operands: ['WaitCompleted'] },
       },
     ]);
   }
+  const queueWait = customerQueueFlow(queueProps).Actions.find((action) => action.Identifier === 'wait-in-queue');
+  expect(queueWait?.Parameters.TimeLimitSeconds).toBe('180');
+  expect(queueWait?.Transitions.NextAction).toBe('wait-in-queue');
+  expect(queueWait?.Transitions.Conditions?.[0].NextAction).toBe('wait-in-queue');
 });
 
 test('queue blocks sit on a 280 pixel grid', () => {

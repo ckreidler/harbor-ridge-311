@@ -757,7 +757,7 @@ test('ConnectStack opens an after-hours case and removes voicemail', () => {
   expect(createCase).toContain('"status":"open"');
   expect(block('create-case').Transitions?.NextAction).toBe('get-case');
   expect(block('create-case').Transitions?.Errors).toEqual([
-    { ErrorType: 'ContactNotLinked', NextAction: 'create-case-other' },
+    { ErrorType: 'ContactNotLinked', NextAction: 'get-case' },
     { ErrorType: 'NoMatchingError', NextAction: 'create-case-other' },
   ]);
   const retryCase = JSON.stringify(block('create-case-other'));
@@ -770,21 +770,57 @@ test('ConnectStack opens an after-hours case and removes voicemail', () => {
   expect(retryCase).not.toContain('escalationReason');
   expect(block('create-case-other').Transitions?.NextAction).toBe('get-case');
   expect(block('create-case-other').Transitions?.Errors).toEqual([
-    { ErrorType: 'ContactNotLinked', NextAction: 'play-closed' },
+    { ErrorType: 'ContactNotLinked', NextAction: 'get-case' },
     { ErrorType: 'NoMatchingError', NextAction: 'play-closed' },
   ]);
 
-  expect(block('get-case').Type).toBe('GetCase');
-  expect(block('get-case').Parameters).toEqual({
+  const getCaseParameters = {
     LinkContactToCase: 'false',
     GetLastUpdatedCase: 'true',
     CaseRequestFields: { case_id: '$.Case.case_id' },
     CaseResponseFields: ['reference_number'],
-  });
+  };
+  expect(block('get-case').Type).toBe('GetCase');
+  expect(block('get-case').Parameters).toEqual(getCaseParameters);
   expect(block('get-case').Transitions?.NextAction).toBe('lookup-after-hours-case');
-  for (const error of block('get-case').Transitions?.Errors ?? []) {
-    expect(error.NextAction).toBe('play-closed');
-  }
+  expect(block('get-case').Transitions?.Errors).toEqual([
+    { ErrorType: 'NoMatchingError', NextAction: 'branch-case-hold' },
+    { ErrorType: 'NoneFound', NextAction: 'branch-case-hold' },
+    { ErrorType: 'MultipleFound', NextAction: 'branch-case-hold' },
+  ]);
+  expect(block('branch-case-hold').Transitions?.Conditions?.[0]).toMatchObject({
+    NextAction: 'play-case-hold-chat',
+    Condition: { Operator: 'Equals', Operands: ['CHAT'] },
+  });
+  expect(block('branch-case-hold').Transitions?.NextAction).toBe('play-case-hold-voice');
+  expect(block('play-case-hold-chat').Parameters?.Text).toBe('One moment while we log your request.');
+  expect(block('play-case-hold-chat').Transitions?.NextAction).toBe('wait-case');
+  expect(block('wait-case')).toMatchObject({
+    Type: 'Wait',
+    Parameters: { TimeLimitSeconds: '3' },
+    Transitions: {
+      NextAction: 'get-case-retry',
+      Conditions: [
+        {
+          NextAction: 'get-case-retry',
+          Condition: { Operator: 'Equals', Operands: ['WaitCompleted'] },
+        },
+      ],
+    },
+  });
+  expect(block('play-case-hold-voice').Parameters?.SSML).toBe(
+    '<speak>One moment while we log your request.<break time="2s"/></speak>',
+  );
+  expect(block('play-case-hold-voice').Parameters?.Text).toBeUndefined();
+  expect(block('play-case-hold-voice').Transitions?.NextAction).toBe('get-case-retry');
+  expect(block('get-case-retry').Type).toBe('GetCase');
+  expect(block('get-case-retry').Parameters).toEqual(getCaseParameters);
+  expect(block('get-case-retry').Transitions?.NextAction).toBe('lookup-after-hours-case');
+  expect(block('get-case-retry').Transitions?.Errors).toEqual([
+    { ErrorType: 'NoMatchingError', NextAction: 'play-closed' },
+    { ErrorType: 'NoneFound', NextAction: 'play-closed' },
+    { ErrorType: 'MultipleFound', NextAction: 'play-closed' },
+  ]);
 
   expect(block('lookup-after-hours-case').Parameters?.Queries).toEqual([{
     QueryName: 'AfterHoursCase',

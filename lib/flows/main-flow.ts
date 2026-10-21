@@ -57,6 +57,8 @@ export const AFTER_HOURS_CLOSED_TEXT = 'Harbor Ridge 311 is closed right now. Ou
 const CASE_REFERENCE_ATTRIBUTE = '$.Case.reference_number';
 const AFTER_HOURS_CASE_PLAY_TEXT = `$.DataTables.AfterHoursCase.Text ${CASE_REFERENCE_ATTRIBUTE}. $.DataTables.AfterHoursCase.TextAfter`;
 const AFTER_HOURS_CASE_VOICE_SSML = `<speak>$.DataTables.AfterHoursCase.Text <say-as interpret-as="digits">${CASE_REFERENCE_ATTRIBUTE}</say-as>. $.DataTables.AfterHoursCase.TextAfter</speak>`;
+const CASE_HOLD_TEXT = 'One moment while we log your request.';
+const CASE_HOLD_VOICE_SSML = `<speak>${CASE_HOLD_TEXT}<break time="2s"/></speak>`;
 const FALLBACK_CASE_TITLE = 'After-hours escalation';
 
 function promptQuery(
@@ -113,6 +115,11 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
         'create-case': { position: { x: 3800, y: 920 } },
         'create-case-other': { position: { x: 3800, y: 1200 } },
         'get-case': { position: { x: 4080, y: 920 } },
+        'branch-case-hold': { position: { x: 4080, y: 1200 } },
+        'play-case-hold-chat': { position: { x: 4360, y: 1200 } },
+        'wait-case': { position: { x: 4640, y: 1200 } },
+        'get-case-retry': { position: { x: 4920, y: 1200 } },
+        'play-case-hold-voice': { position: { x: 4360, y: 1480 } },
         'lookup-after-hours-case': { position: { x: 4360, y: 920 } },
         'check-case-prompt': { position: { x: 4640, y: 920 } },
         'check-reference': { position: { x: 4920, y: 920 } },
@@ -402,7 +409,7 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
         Transitions: {
           NextAction: 'get-case',
           Errors: [
-            { ErrorType: 'ContactNotLinked', NextAction: 'create-case-other' },
+            { ErrorType: 'ContactNotLinked', NextAction: 'get-case' },
             { ErrorType: 'NoMatchingError', NextAction: 'create-case-other' },
           ],
           Conditions: [],
@@ -425,7 +432,7 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
         Transitions: {
           NextAction: 'get-case',
           Errors: [
-            { ErrorType: 'ContactNotLinked', NextAction: 'play-closed' },
+            { ErrorType: 'ContactNotLinked', NextAction: 'get-case' },
             { ErrorType: 'NoMatchingError', NextAction: 'play-closed' },
           ],
           Conditions: [],
@@ -433,6 +440,87 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
       },
       {
         Identifier: 'get-case',
+        Type: 'GetCase',
+        Parameters: {
+          LinkContactToCase: 'false',
+          GetLastUpdatedCase: 'true',
+          CaseRequestFields: {
+            case_id: '$.Case.case_id',
+          },
+          CaseResponseFields: ['reference_number'],
+        },
+        Transitions: {
+          NextAction: 'lookup-after-hours-case',
+          Errors: [
+            { ErrorType: 'NoMatchingError', NextAction: 'branch-case-hold' },
+            { ErrorType: 'NoneFound', NextAction: 'branch-case-hold' },
+            { ErrorType: 'MultipleFound', NextAction: 'branch-case-hold' },
+          ],
+          Conditions: [],
+        },
+      },
+      {
+        Identifier: 'branch-case-hold',
+        Type: 'Compare',
+        Parameters: {
+          ComparisonValue: '$.Channel',
+        },
+        Transitions: {
+          NextAction: 'play-case-hold-voice',
+          Conditions: [
+            {
+              NextAction: 'play-case-hold-chat',
+              Condition: { Operator: 'Equals', Operands: ['CHAT'] },
+            },
+          ],
+          Errors: [
+            { ErrorType: 'NoMatchingCondition', NextAction: 'play-case-hold-voice' },
+          ],
+        },
+      },
+      {
+        Identifier: 'play-case-hold-chat',
+        Type: 'MessageParticipant',
+        Parameters: {
+          Text: CASE_HOLD_TEXT,
+        },
+        Transitions: {
+          NextAction: 'wait-case',
+          Errors: errorTo('wait-case'),
+          Conditions: [],
+        },
+      },
+      {
+        Identifier: 'wait-case',
+        Type: 'Wait',
+        Parameters: {
+          TimeLimitSeconds: '3',
+        },
+        Transitions: {
+          NextAction: 'get-case-retry',
+          Conditions: [
+            {
+              NextAction: 'get-case-retry',
+              Condition: { Operator: 'Equals', Operands: ['WaitCompleted'] },
+            },
+          ],
+          Errors: errorTo('get-case-retry'),
+        },
+      },
+      {
+        Identifier: 'play-case-hold-voice',
+        Type: 'MessageParticipant',
+        Parameters: {
+          SSML: CASE_HOLD_VOICE_SSML,
+        },
+        Transitions: {
+          NextAction: 'get-case-retry',
+          Errors: errorTo('get-case-retry'),
+          Conditions: [],
+        },
+      },
+      {
+        Identifier: 'get-case-retry',
         Type: 'GetCase',
         Parameters: {
           LinkContactToCase: 'false',
