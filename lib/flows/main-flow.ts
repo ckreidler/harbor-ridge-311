@@ -43,9 +43,19 @@ export interface MainFlowProps {
   afterHoursFlowArn: string;
 }
 
-const ENGLISH_GREETING = 'Thank you for calling Harbor Ridge 3 1 1. This line is a demo.';
-const ENGLISH_GOODBYE = 'Thank you for calling Harbor Ridge 3 1 1. Goodbye.';
-const ENGLISH_QUESTION = 'What can I help you with? You can ask about trash pickup, potholes, parking permits, or office hours. Say agent if you would rather talk to a person.';
+const VOICE_GREETING = 'Thank you for calling Harbor Ridge 3 1 1. This line is a demo.';
+const VOICE_GOODBYE = 'Thank you for calling Harbor Ridge 3 1 1. Goodbye.';
+
+function promptQuery(prompt: 'Greeting' | 'Goodbye' | 'Question') {
+  return {
+    QueryName: prompt,
+    Attributes: ['Text'],
+    PrimaryValues: [
+      { AttributeName: 'Prompt', Value: prompt },
+      { AttributeName: 'Channel', Value: '$.Channel' },
+    ],
+  };
+}
 
 function errorTo(nextAction: string): FlowError[] {
   return [{ ErrorType: 'NoMatchingError', NextAction: nextAction }];
@@ -62,6 +72,7 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
         'set-en-language': { position: { x: 420, y: 200 } },
         'set-en-voice': { position: { x: 680, y: 200 } },
         'lookup-prompts': { position: { x: 940, y: 200 } },
+        'check-prompt': { position: { x: 1070, y: 200 } },
         'play-greeting': { position: { x: 1200, y: 200 } },
         'play-fallback': { position: { x: 1200, y: 480 } },
         'create-assistant-session': { position: { x: 1460, y: 200 } },
@@ -119,26 +130,41 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
         Parameters: {
           DataTableId: props.dataTableId,
           Queries: [
-            {
-              QueryName: 'Prompts',
-              Attributes: ['Greeting', 'Goodbye'],
-              PrimaryValues: [
-                { AttributeName: 'Language', Value: '$.LanguageCode' },
-              ],
-            },
+            promptQuery('Greeting'),
+            promptQuery('Goodbye'),
+            promptQuery('Question'),
           ],
         },
         Transitions: {
-          NextAction: 'play-greeting',
+          NextAction: 'check-prompt',
           Errors: errorTo('play-fallback'),
           Conditions: [],
+        },
+      },
+      {
+        Identifier: 'check-prompt',
+        Type: 'Compare',
+        Parameters: {
+          ComparisonValue: '$.DataTables.Greeting.Text',
+        },
+        Transitions: {
+          NextAction: 'play-greeting',
+          Conditions: [
+            {
+              NextAction: 'play-fallback',
+              Condition: { Operator: 'Equals', Operands: [''] },
+            },
+          ],
+          Errors: [
+            { ErrorType: 'NoMatchingCondition', NextAction: 'play-greeting' },
+          ],
         },
       },
       {
         Identifier: 'play-greeting',
         Type: 'MessageParticipant',
         Parameters: {
-          Text: '$.DataTables.Prompts.Greeting',
+          Text: '$.DataTables.Greeting.Text',
         },
         Transitions: {
           NextAction: 'create-assistant-session',
@@ -178,7 +204,7 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
         Identifier: 'ask-en-question',
         Type: 'ConnectParticipantWithLexBot',
         Parameters: {
-          Text: ENGLISH_QUESTION,
+          Text: '$.DataTables.Question.Text',
           LexV2Bot: {
             AliasArn: props.lexBotAliasArn,
           },
@@ -286,7 +312,7 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
         Identifier: 'play-goodbye',
         Type: 'MessageParticipant',
         Parameters: {
-          Text: '$.DataTables.Prompts.Goodbye',
+          Text: '$.DataTables.Goodbye.Text',
         },
         Transitions: {
           NextAction: 'disconnect',
@@ -298,7 +324,7 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
         Identifier: 'play-fallback',
         Type: 'MessageParticipant',
         Parameters: {
-          Text: `${ENGLISH_GREETING} ${ENGLISH_GOODBYE}`,
+          Text: `${VOICE_GREETING} ${VOICE_GOODBYE}`,
         },
         Transitions: {
           NextAction: 'disconnect',

@@ -239,43 +239,43 @@ export class ConnectStack extends cdk.Stack {
       valueLockLevel: 'NONE',
     });
 
-    const languageAttribute = new connect.CfnDataTableAttribute(this, 'LanguageAttribute', {
+    const promptAttribute = new connect.CfnDataTableAttribute(this, 'PromptAttribute', {
       instanceArn,
       dataTableArn: prompts.attrArn,
-      name: 'Language',
+      name: 'Prompt',
       primary: true,
       valueType: 'TEXT',
     });
-    const greetingAttribute = new connect.CfnDataTableAttribute(this, 'GreetingAttribute', {
+    const channelAttribute = new connect.CfnDataTableAttribute(this, 'ChannelAttribute', {
       instanceArn,
       dataTableArn: prompts.attrArn,
-      name: 'Greeting',
+      name: 'Channel',
+      primary: true,
       valueType: 'TEXT',
     });
-    const goodbyeAttribute = new connect.CfnDataTableAttribute(this, 'GoodbyeAttribute', {
+    const textAttribute = new connect.CfnDataTableAttribute(this, 'TextAttribute', {
       instanceArn,
       dataTableArn: prompts.attrArn,
-      name: 'Goodbye',
+      name: 'Text',
       valueType: 'TEXT',
     });
     const promptRows = [
-      {
-        id: 'EnglishPrompt',
-        language: 'en-US',
-        greeting: 'Thank you for calling Harbor Ridge 3 1 1. This line is a demo.',
-        goodbye: 'Thank you for calling Harbor Ridge 3 1 1. Goodbye.',
-      },
-    ].map((row) => new connect.CfnDataTableRecord(this, row.id, {
+      ['Greeting', 'VOICE', 'Thank you for calling Harbor Ridge 3 1 1. This line is a demo.'],
+      ['Greeting', 'CHAT', 'Welcome to Harbor Ridge 311 chat. This is a demo.'],
+      ['Goodbye', 'VOICE', 'Thank you for calling Harbor Ridge 3 1 1. Goodbye.'],
+      ['Goodbye', 'CHAT', 'Thanks for chatting with Harbor Ridge 311. Goodbye.'],
+      ['Question', 'VOICE', 'What can I help you with? You can ask about trash pickup, potholes, parking permits, or office hours. Say agent if you would rather talk to a person.'],
+      ['Question', 'CHAT', 'What can I help you with? You can ask about trash pickup, potholes, parking permits, or office hours, or type agent to reach a person.'],
+    ].map(([prompt, channel, text]) => new connect.CfnDataTableRecord(this, `${prompt}${channel}`, {
       instanceArn,
       dataTableArn: prompts.attrArn,
       dataTableRecord: {
-        primaryValues: [{
-          attributeId: languageAttribute.attrAttributeId,
-          attributeValue: row.language,
-        }],
+        primaryValues: [
+          { attributeId: promptAttribute.attrAttributeId, attributeValue: prompt },
+          { attributeId: channelAttribute.attrAttributeId, attributeValue: channel },
+        ],
         values: [
-          { attributeId: greetingAttribute.attrAttributeId, attributeValue: row.greeting },
-          { attributeId: goodbyeAttribute.attrAttributeId, attributeValue: row.goodbye },
+          { attributeId: textAttribute.attrAttributeId, attributeValue: text },
         ],
       },
     }));
