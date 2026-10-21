@@ -167,25 +167,17 @@ test('ConnectStack looks up the English prompts and associates the sandbox numbe
       { AttributeName: 'Channel', Value: '$.Channel' },
     ],
   })));
-  expect(lookup?.Transitions?.NextAction).toBe('check-prompt');
+  expect(lookup?.Transitions?.NextAction).toBe('play-greeting');
   expect(lookup?.Transitions?.Errors?.[0].NextAction).toBe('play-fallback');
 
   const greeting = content.Actions.find((action) => action.Identifier === 'play-greeting');
   const goodbye = content.Actions.find((action) => action.Identifier === 'play-goodbye');
   expect(greeting?.Parameters?.Text).toBe('$.DataTables.Greeting.Text');
+  expect(greeting?.Transitions?.Errors?.[0].NextAction).toBe('play-fallback');
   expect(goodbye?.Parameters?.Text).toBe('$.DataTables.Goodbye.Text');
-  const found = content.Actions.find((action) => action.Identifier === 'check-prompt');
-  expect(found?.Type).toBe('Compare');
-  expect(found?.Parameters?.ComparisonValue).toBe('$.DataTables.Greeting.Text');
-  expect(found?.Transitions?.NextAction).toBe('play-fallback');
-  expect(found?.Transitions?.Conditions).toEqual([{
-    NextAction: 'play-greeting',
-    Condition: { Operator: 'Exists', Operands: [] },
-  }]);
-  expect(found?.Transitions?.Errors).toEqual([{
-    ErrorType: 'NoMatchingCondition',
-    NextAction: 'play-fallback',
-  }]);
+  expect(content.Actions.some((action) => action.Identifier === 'check-prompt')).toBe(false);
+  expect(content.Actions.some((action) => action.Identifier === 'set-en-language')).toBe(false);
+  expect(JSON.stringify(content)).not.toContain('LanguageCode');
   expect(content.Actions.some((action) => action.Identifier === 'branch-channel')).toBe(false);
   expect(content.Actions.some((action) => action.Identifier === 'set-chat-prompts')).toBe(false);
   expect(content.Actions.find((action) => action.Identifier === 'set-en-voice')?.Transitions?.NextAction)
@@ -198,7 +190,7 @@ test('ConnectStack looks up the English prompts and associates the sandbox numbe
   expect(content.Actions.find((action) => action.Identifier === 'set-en-voice')?.Parameters?.TextToSpeechVoice)
     .toBe('Joanna');
   expect(content.Actions.find((action) => action.Identifier === 'enable-flow-logging')?.Transitions?.NextAction)
-    .toBe('set-en-language');
+    .toBe('set-en-voice');
   expect(content.Actions.map((action) => action.Identifier).every((id) => content.Metadata.ActionMetadata[id]?.position))
     .toBe(true);
   const recordIds = Object.keys(template.findResources('AWS::Connect::DataTableRecord'));
@@ -697,14 +689,8 @@ test('ConnectStack records an after-hours voicemail when the office is closed', 
   const logging = main.Actions.find((action) => action.Identifier === 'enable-flow-logging');
   const hoursCheck = main.Actions.find((action) => action.Identifier === 'check-hours');
   expect(main.StartAction).toBe('enable-flow-logging');
-  expect(logging?.Transitions?.NextAction).toBe('set-en-language');
-  const beforeLanguage: string[] = [];
-  let cursor: string | undefined = main.StartAction;
-  while (cursor && cursor !== 'set-en-language') {
-    beforeLanguage.push(cursor);
-    cursor = main.Actions.find((action) => action.Identifier === cursor)?.Transitions?.NextAction;
-  }
-  expect(beforeLanguage).toEqual(['enable-flow-logging']);
+  expect(logging?.Transitions?.NextAction).toBe('set-en-voice');
+  expect(main.Actions.some((action) => action.Identifier === 'set-en-language')).toBe(false);
   expect(hoursCheck?.Type).toBe('CheckHoursOfOperation');
   expect(hoursCheck?.Transitions?.Conditions?.find((branch) => branch.Condition.Operands[0] === 'True')?.NextAction)
     .toBe('play-agent-placeholder');
@@ -719,8 +705,8 @@ test('ConnectStack records an after-hours voicemail when the office is closed', 
   expect(placeholder?.Parameters?.Text).toBe('This is where we would escalate to an agent.');
   expect(placeholder?.Transitions?.NextAction).toBe('disconnect');
   expect(main.Actions.find((action) => action.Identifier === 'transfer-after-hours')?.Type).toBe('TransferToFlow');
-  expect(main.Actions.find((action) => action.Identifier === 'set-en-language')?.Transitions?.NextAction)
-    .toBe('set-en-voice');
+  expect(main.Actions.find((action) => action.Identifier === 'set-en-voice')?.Transitions?.NextAction)
+    .toBe('lookup-prompts');
   expect(main.Actions.some((action) => action.Identifier === 'select-language')).toBe(false);
 
   const afterHours = contactFlow(template, 'HarborRidge311-AfterHours');

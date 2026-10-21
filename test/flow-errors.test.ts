@@ -6,7 +6,6 @@ const allowedErrors: Record<string, readonly string[]> = {
   CheckHoursOfOperation: ['NoMatchingError'],
   TransferToFlow: ['NoMatchingError'],
   GetParticipantInput: ['InputTimeLimitExceeded', 'NoMatchingCondition', 'NoMatchingError'],
-  UpdateContactData: ['NoMatchingError'],
   UpdateContactTextToSpeechVoice: ['NoMatchingError'],
   EvaluateDataTableValues: ['NoMatchingError'],
   MessageParticipant: ['NoMatchingError'],
@@ -84,7 +83,53 @@ test('compare conditions do not use an empty-string operand', () => {
   }
 });
 
-test('main flow looks up prompt text by channel and falls back when the row is missing', () => {
+test('main flow block positions leave space between every block', () => {
+  const flow = mainFlow(flowProps);
+  const mainPath = [
+    'enable-flow-logging',
+    'set-en-voice',
+    'lookup-prompts',
+    'play-greeting',
+    'create-assistant-session',
+    'select-orchestrator',
+    'ask-en-question',
+    'check-tool',
+  ];
+  const position = (id: string) => {
+    const found = flow.Metadata.ActionMetadata[id]?.position;
+    if (!found) {
+      throw new Error(`missing position for ${id}`);
+    }
+    return found;
+  };
+
+  for (let index = 0; index < mainPath.length - 1; index += 1) {
+    const left = position(mainPath[index]);
+    const right = position(mainPath[index + 1]);
+    expect(right.y).toBe(left.y);
+    expect(right.x - left.x).toBeGreaterThanOrEqual(250);
+    expect(right.x - left.x).toBeLessThanOrEqual(300);
+  }
+
+  const greeting = position('play-greeting');
+  const fallback = position('play-fallback');
+  expect(fallback.x).toBe(greeting.x);
+  expect(fallback.y - greeting.y).toBeGreaterThanOrEqual(250);
+
+  const ids = flow.Actions.map((action) => action.Identifier);
+  expect(new Set(Object.keys(flow.Metadata.ActionMetadata))).toEqual(new Set(ids));
+  for (let left = 0; left < ids.length; left += 1) {
+    for (let right = left + 1; right < ids.length; right += 1) {
+      const a = position(ids[left]);
+      const b = position(ids[right]);
+      const dx = Math.abs(a.x - b.x);
+      const dy = Math.abs(a.y - b.y);
+      expect(dx >= 250 || dy >= 250).toBe(true);
+    }
+  }
+});
+
+test('main flow looks up prompt text by channel and plays the greeting on success', () => {
   const flow = mainFlow(flowProps);
   const block = (identifier: string) => {
     const found = flow.Actions.find((action) => action.Identifier === identifier);
@@ -114,21 +159,17 @@ test('main flow looks up prompt text by channel and falls back when the row is m
       })),
     },
     Transitions: {
-      NextAction: 'check-prompt',
+      NextAction: 'play-greeting',
       Errors: [{ ErrorType: 'NoMatchingError', NextAction: 'play-fallback' }],
     },
   });
-  expect(block('check-prompt')).toMatchObject({
-    Type: 'Compare',
-    Parameters: { ComparisonValue: '$.DataTables.Greeting.Text' },
-    Transitions: {
-      NextAction: 'play-fallback',
-      Conditions: [{
-        NextAction: 'play-greeting',
-        Condition: { Operator: 'Exists', Operands: [] },
-      }],
-      Errors: [{ ErrorType: 'NoMatchingCondition', NextAction: 'play-fallback' }],
-    },
+  expect(flow.Actions.some((action) => action.Identifier === 'check-prompt')).toBe(false);
+  expect(flow.Actions.some((action) => action.Identifier === 'set-en-language')).toBe(false);
+  expect(JSON.stringify(flow)).not.toContain('LanguageCode');
+  expect(block('enable-flow-logging').Transitions.NextAction).toBe('set-en-voice');
+  expect(block('play-greeting').Transitions).toMatchObject({
+    NextAction: 'create-assistant-session',
+    Errors: [{ ErrorType: 'NoMatchingError', NextAction: 'play-fallback' }],
   });
   expect(block('play-greeting').Parameters.Text).toBe('$.DataTables.Greeting.Text');
   expect(block('play-goodbye').Parameters.Text).toBe('$.DataTables.Goodbye.Text');
