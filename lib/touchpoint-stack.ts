@@ -6,6 +6,7 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as nodejs from 'aws-cdk-lib/aws-lambda-nodejs';
 import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
 import * as cdk from 'aws-cdk-lib/core';
 import * as cr from 'aws-cdk-lib/custom-resources';
@@ -46,9 +47,19 @@ export class TouchpointStack extends cdk.Stack {
       MAIN_CONTACT_FLOW_ARN_PARAMETER,
     );
     const contactResources = [instanceArn, contactFlowArn];
+    const stopSecret = new secretsmanager.Secret(this, 'VoiceStopSecret', {
+      description: 'HMAC key that authorizes stopping a Harbor Ridge web call',
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      generateSecretString: {
+        passwordLength: 32,
+        excludePunctuation: true,
+      },
+    });
+    const stopSecretValue = stopSecret.secretValue.unsafeUnwrap();
 
     const chatLogGroup = contactLogGroup(this, 'StartChatLogs', 'HarborRidge311-StartChat');
     const voiceLogGroup = contactLogGroup(this, 'StartWebRtcLogs', 'HarborRidge311-StartWebRtc');
+    const stopLogGroup = contactLogGroup(this, 'StopVoiceLogs', 'HarborRidge311-StopVoice');
     const chatFunction = contactFunction(this, 'StartChat', {
       handler: 'chatHandler',
       functionName: 'HarborRidge311-StartChat',
@@ -68,11 +79,23 @@ export class TouchpointStack extends cdk.Stack {
       contactFlowId,
       siteOrigin: props.siteOrigin,
       resources: contactResources,
+      environment: { STOP_SECRET: stopSecretValue },
+    });
+    const stopFunction = contactFunction(this, 'StopVoice', {
+      handler: 'stopVoiceHandler',
+      functionName: 'HarborRidge311-StopVoice',
+      logGroup: stopLogGroup,
+      action: 'connect:StopContact',
+      instanceId,
+      contactFlowId,
+      siteOrigin: props.siteOrigin,
+      resources: [cdk.Fn.join('', [instanceArn, '/contact/*'])],
+      environment: { STOP_SECRET: stopSecretValue },
     });
 
     const api = new apigateway.RestApi(this, 'TouchpointApi', {
       restApiName: 'HarborRidge311-Touchpoint',
-      description: 'Starts Harbor Ridge 311 chat and web calls',
+      description: 'Starts Harbor Ridge 311 chat and web calls and stops a web call the browser started',
       cloudWatchRole: false,
       endpointConfiguration: { types: [apigateway.EndpointType.REGIONAL] },
       deployOptions: {
@@ -104,12 +127,15 @@ export class TouchpointStack extends cdk.Stack {
     chat.addMethod('POST', new apigateway.LambdaIntegration(chatFunction));
     const voice = api.root.addResource('voice');
     voice.addMethod('POST', new apigateway.LambdaIntegration(voiceFunction));
+    const voiceStop = voice.addResource('stop');
+    voiceStop.addMethod('POST', new apigateway.LambdaIntegration(stopFunction));
 
     const configBody = cdk.Fn.join('', [
       'window.HARBOR_RIDGE_TOUCHPOINT=',
       cdk.Fn.toJsonString({
         chatEndpoint: api.urlForPath('/chat'),
         voiceEndpoint: api.urlForPath('/voice'),
+        voiceStopEndpoint: api.urlForPath('/voice/stop'),
         instanceId,
         contactFlowId,
         region: this.region,
@@ -164,6 +190,10 @@ export class TouchpointStack extends cdk.Stack {
       value: api.urlForPath('/voice'),
       description: 'Public StartWebRTCContact endpoint',
     });
+    new cdk.CfnOutput(this, 'VoiceStopEndpoint', {
+      value: api.urlForPath('/voice/stop'),
+      description: 'Public StopContact endpoint for a web call this browser started',
+    });
   }
 }
 
@@ -184,6 +214,7 @@ function contactFunction(scope: Construct, id: string, options: {
   contactFlowId: string;
   siteOrigin: string;
   resources: string[];
+  environment?: Record<string, string>;
 }): nodejs.NodejsFunction {
   const role = new iam.Role(scope, `${id}Role`, {
     assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
@@ -210,6 +241,7 @@ function contactFunction(scope: Construct, id: string, options: {
       INSTANCE_ID: options.instanceId,
       CONTACT_FLOW_ID: options.contactFlowId,
       ALLOWED_ORIGIN: options.siteOrigin,
+      ...options.environment,
     },
   });
 }

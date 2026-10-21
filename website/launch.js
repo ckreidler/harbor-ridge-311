@@ -7,6 +7,57 @@
 
   var current = null;
   var mode = null;
+  var activeVoiceStop = null;
+  var nativeFetch = typeof window.fetch === 'function' ? window.fetch.bind(window) : null;
+
+  if (nativeFetch) {
+    window.fetch = function (input, init) {
+      var result = nativeFetch(input, init);
+      var url = typeof input === 'string' ? input : (input && input.url);
+      if (config && url === config.voiceEndpoint && result && typeof result.then === 'function') {
+        result.then(function (response) {
+          if (!response || !response.ok || typeof response.clone !== 'function') return;
+          var cloned = response.clone();
+          if (!cloned || typeof cloned.json !== 'function') return;
+          cloned.json().then(function (body) {
+            if (!body || typeof body.ContactId !== 'string' || typeof body.StopToken !== 'string') return;
+            if (body.ContactId === '' || body.StopToken === '') return;
+            activeVoiceStop = { contactId: body.ContactId, stopToken: body.StopToken };
+          }).catch(function () {});
+        }).catch(function () {});
+      }
+      return result;
+    };
+  }
+
+  function stopVoiceOnLeave() {
+    var pending = activeVoiceStop;
+    var endpoint = config && config.voiceStopEndpoint;
+    if (!pending || !endpoint) return;
+    var body = JSON.stringify({ ContactId: pending.contactId, StopToken: pending.stopToken });
+    var queued = false;
+    if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
+      try {
+        queued = navigator.sendBeacon(endpoint, body) === true;
+      } catch (error) {
+        queued = false;
+      }
+    }
+    if (!queued && nativeFetch) {
+      try {
+        nativeFetch(endpoint, {
+          method: 'POST',
+          body: body,
+          keepalive: true,
+          headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+        });
+        queued = true;
+      } catch (error) {
+        queued = false;
+      }
+    }
+    if (queued) activeVoiceStop = null;
+  }
 
   function setStatus(text) {
     if (!status) return;
@@ -94,4 +145,5 @@
 
   chatButton.addEventListener('click', function () { open('chat'); });
   callButton.addEventListener('click', function () { open('call'); });
+  window.addEventListener('pagehide', stopVoiceOnLeave);
 }());

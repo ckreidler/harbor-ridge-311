@@ -114,11 +114,24 @@ test('TouchpointStack publishes throttled chat and voice routes for the main flo
     'OPTIONS',
     'OPTIONS',
     'OPTIONS',
+    'OPTIONS',
+    'POST',
     'POST',
     'POST',
   ]);
+  template.hasResourceProperties('AWS::ApiGateway::Stage', {
+    MethodSettings: Match.arrayWith([
+      Match.objectLike({
+        ResourcePath: '/*',
+        HttpMethod: '*',
+        ThrottlingRateLimit: 1,
+        ThrottlingBurstLimit: 2,
+      }),
+    ]),
+  });
   template.hasResourceProperties('AWS::ApiGateway::Resource', { PathPart: 'chat' });
   template.hasResourceProperties('AWS::ApiGateway::Resource', { PathPart: 'voice' });
+  template.hasResourceProperties('AWS::ApiGateway::Resource', { PathPart: 'stop' });
 
   const resources = template.toJSON().Resources as Record<string, {
     Type: string;
@@ -139,6 +152,7 @@ test('TouchpointStack publishes throttled chat and voice routes for the main flo
   }>;
   const chat = Object.values(functions).find((fn) => fn.Properties.FunctionName === 'HarborRidge311-StartChat');
   const voice = Object.values(functions).find((fn) => fn.Properties.FunctionName === 'HarborRidge311-StartWebRtc');
+  const stop = Object.values(functions).find((fn) => fn.Properties.FunctionName === 'HarborRidge311-StopVoice');
   const instanceId = chat?.Properties.Environment?.Variables.INSTANCE_ID as { Ref: string };
   expect(template.toJSON().Parameters[instanceId.Ref].Default).toBe('/connect/sandbox/instance-id');
   const connectTemplate = Template.fromStack(connect);
@@ -171,6 +185,12 @@ test('TouchpointStack publishes throttled chat and voice routes for the main flo
     chat?.Properties.Environment?.Variables.CONTACT_FLOW_ID,
   );
   expect(JSON.stringify(chat?.Properties.Environment)).toContain('https://');
+  expect(chat?.Properties.Environment?.Variables.STOP_SECRET).toBeUndefined();
+  expect(voice?.Properties.Environment?.Variables.STOP_SECRET).toBeDefined();
+  expect(stop?.Properties.Environment?.Variables.STOP_SECRET).toEqual(
+    voice?.Properties.Environment?.Variables.STOP_SECRET,
+  );
+  expect(JSON.stringify(stop?.Properties.Environment?.Variables.STOP_SECRET)).toContain('resolve:secretsmanager');
 
   const policies = template.findResources('AWS::IAM::Policy') as Record<string, {
     Properties: {
@@ -187,9 +207,14 @@ test('TouchpointStack publishes throttled chat and voice routes for the main flo
   expect(connectStatements.map((statement) => statement.Action).sort()).toEqual([
     'connect:StartChatContact',
     'connect:StartWebRTCContact',
+    'connect:StopContact',
   ]);
   const templateJson = template.toJSON();
-  for (const statement of connectStatements) {
+  const startStatements = connectStatements.filter((statement) => statement.Action !== 'connect:StopContact');
+  for (const statement of startStatements) {
+    const actions = [statement.Action].flat();
+    expect(actions).toEqual([statement.Action]);
+    expect(String(statement.Action)).not.toContain('*');
     const resourcesForAction = [statement.Resource].flat() as Array<{ Ref?: string }>;
     expect(resourcesForAction).toHaveLength(2);
     expect(JSON.stringify(resourcesForAction)).not.toContain('*');
@@ -199,10 +224,22 @@ test('TouchpointStack publishes throttled chat and voice routes for the main flo
       MAIN_CONTACT_FLOW_ARN_PARAMETER,
     ]));
   }
+  const stopStatement = connectStatements.find((statement) => statement.Action === 'connect:StopContact');
+  expect(stopStatement?.Resource).toEqual({
+    'Fn::Join': ['', [
+      { Ref: expect.any(String) },
+      '/contact/*',
+    ]],
+  });
+  const stopResource = stopStatement?.Resource as { 'Fn::Join': [string, [{ Ref: string }, string]] };
+  expect(templateJson.Parameters[stopResource['Fn::Join'][1][0].Ref].Default).toBe('/connect/sandbox/instance-arn');
 
   const json = JSON.stringify(templateJson);
   expect(json).toContain('/connect/sandbox/instance-arn');
   expect(json).toContain('config.js');
+  expect(json).toContain('voiceStopEndpoint');
+  expect(json).toContain('/voice/stop');
   expect(json).not.toContain("'*'");
+  expect(json).not.toContain('"connect:*"');
   expect(json).toContain('\'https://');
 });

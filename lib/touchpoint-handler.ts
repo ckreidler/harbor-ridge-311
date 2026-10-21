@@ -1,5 +1,13 @@
+import { createHmac, timingSafeEqual } from 'node:crypto';
+
 const DISPLAY_NAME = 'Harbor Ridge visitor';
 const MAX_BODY_BYTES = 4096;
+const CONTACT_ID = /^[A-Za-z0-9-]{1,256}$/;
+const ALREADY_ENDED = new Set([
+  'ContactNotFoundException',
+  'ResourceNotFoundException',
+  'InvalidRequestException',
+]);
 
 const CHAT_CONTENT_TYPES = [
   'text/plain',
@@ -31,6 +39,7 @@ interface ConnectModule {
   };
   StartChatContactCommand: new (input: Record<string, unknown>) => ConnectCommand;
   StartWebRTCContactCommand: new (input: Record<string, unknown>) => ConnectCommand;
+  StopContactCommand: new (input: Record<string, unknown>) => ConnectCommand;
 }
 
 class BodyError extends Error {}
@@ -69,8 +78,8 @@ function jsonResult(statusCode: number, body: unknown, origin: string): ProxyRes
   };
 }
 
-function readBody(event: ProxyEvent): void {
-  if (!event.body) return;
+function readBody(event: ProxyEvent): unknown {
+  if (!event.body) return undefined;
   const text = event.isBase64Encoded
     ? Buffer.from(event.body, 'base64').toString('utf8')
     : event.body;
@@ -78,10 +87,25 @@ function readBody(event: ProxyEvent): void {
     throw new BodyError('Request body is too large');
   }
   try {
-    JSON.parse(text);
+    return JSON.parse(text) as unknown;
   } catch {
     throw new BodyError('Request body is not JSON');
   }
+}
+
+function plainObject(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  return value as Record<string, unknown>;
+}
+
+function stopTokenFor(contactId: string): string {
+  return createHmac('sha256', required('STOP_SECRET')).update(contactId).digest('base64url');
+}
+
+function sameToken(provided: string, expected: string): boolean {
+  const left = Buffer.from(provided);
+  const right = Buffer.from(expected);
+  return left.length === right.length && timingSafeEqual(left, right);
 }
 
 async function startContact(event: ProxyEvent, channel: 'chat' | 'voice'): Promise<ProxyResult> {
@@ -92,6 +116,7 @@ async function startContact(event: ProxyEvent, channel: 'chat' | 'voice'): Promi
 
   try {
     readBody(event);
+    if (channel === 'voice') required('STOP_SECRET');
     const sdk = await touchpointRuntime.loadSdk<ConnectModule>('@aws-sdk/client-connect');
     const client = new sdk.ConnectClient();
     const input: Record<string, unknown> = {
@@ -118,11 +143,13 @@ async function startContact(event: ProxyEvent, channel: 'chat' | 'voice'): Promi
         },
       }, origin);
     }
+    const contactId = typeof result.ContactId === 'string' ? result.ContactId : '';
     return jsonResult(200, {
       ConnectionData: result.ConnectionData,
       ContactId: result.ContactId,
       ParticipantId: result.ParticipantId,
       ParticipantToken: result.ParticipantToken,
+      ...(contactId ? { StopToken: stopTokenFor(contactId) } : {}),
     }, origin);
   } catch (error) {
     if (error instanceof BodyError) {
@@ -139,4 +166,41 @@ export function chatHandler(event: ProxyEvent): Promise<ProxyResult> {
 
 export function voiceHandler(event: ProxyEvent): Promise<ProxyResult> {
   return startContact(event, 'voice');
+}
+
+export async function stopVoiceHandler(event: ProxyEvent): Promise<ProxyResult> {
+  const origin = required('ALLOWED_ORIGIN');
+  if (header(event.headers, 'origin') !== origin) {
+    return jsonResult(403, { message: 'Origin is not allowed' }, origin);
+  }
+
+  try {
+    const body = plainObject(readBody(event));
+    const contactId = body?.ContactId;
+    const stopToken = body?.StopToken;
+    if (typeof contactId !== 'string' || typeof stopToken !== 'string') {
+      return jsonResult(400, { message: 'Request body is not JSON' }, origin);
+    }
+    if (!CONTACT_ID.test(contactId) || !sameToken(stopToken, stopTokenFor(contactId))) {
+      return jsonResult(403, { message: 'Contact cannot be stopped' }, origin);
+    }
+    const sdk = await touchpointRuntime.loadSdk<ConnectModule>('@aws-sdk/client-connect');
+    const client = new sdk.ConnectClient();
+    await client.send(new sdk.StopContactCommand({
+      InstanceId: required('INSTANCE_ID'),
+      ContactId: contactId,
+    }));
+    return jsonResult(200, { stopped: true }, origin);
+  } catch (error) {
+    if (error instanceof BodyError) {
+      return jsonResult(400, { message: error.message }, origin);
+    }
+    const name = error instanceof Error ? error.name : 'Error';
+    if (name === 'InvalidRequestException') console.error('stop', name);
+    if (ALREADY_ENDED.has(name)) {
+      return jsonResult(200, { stopped: true }, origin);
+    }
+    console.error('stop', name);
+    return jsonResult(502, { message: 'Could not stop the contact' }, origin);
+  }
 }
