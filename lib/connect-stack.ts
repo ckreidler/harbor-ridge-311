@@ -2,28 +2,22 @@ import * as path from 'node:path';
 import * as appintegrations from 'aws-cdk-lib/aws-appintegrations';
 import * as cases from 'aws-cdk-lib/aws-cases';
 import * as connect from 'aws-cdk-lib/aws-connect';
-import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
-import * as events from 'aws-cdk-lib/aws-events';
-import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as kms from 'aws-cdk-lib/aws-kms';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
-import * as destinations from 'aws-cdk-lib/aws-lambda-destinations';
 import * as nodejs from 'aws-cdk-lib/aws-lambda-nodejs';
 import * as lex from 'aws-cdk-lib/aws-lex';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
-import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
 import * as wisdom from 'aws-cdk-lib/aws-wisdom';
 import * as cdk from 'aws-cdk-lib/core';
 import * as cr from 'aws-cdk-lib/custom-resources';
 import { Construct } from 'constructs';
-import { AFTER_HOURS_CHAT_TEXT, afterHoursFlow } from './flows/after-hours-flow';
 import { escalationGuideFlow } from './flows/escalation-guide-flow';
-import { mainFlow } from './flows/main-flow';
+import { AFTER_HOURS_CASE_CHAT_TEXT, AFTER_HOURS_CASE_VOICE_TEXT, mainFlow } from './flows/main-flow';
 import { customerQueueFlow, QUEUE_CHAT_TEXT, QUEUE_VOICE_TEXT } from './flows/queue-flow';
 import { ORCHESTRATION_MODEL_ID, orchestrationPrompt } from './orchestration-prompt';
 import { SELF_SERVICE_USE_CASE } from './select-orchestrator';
@@ -32,8 +26,16 @@ export const SANDBOX_PARAMETER_PREFIX = '/connect/sandbox';
 export const MAIN_CONTACT_FLOW_ID_PARAMETER = `${SANDBOX_PARAMETER_PREFIX}/harbor-ridge-311/main-contact-flow-id`;
 export const MAIN_CONTACT_FLOW_ARN_PARAMETER = `${SANDBOX_PARAMETER_PREFIX}/harbor-ridge-311/main-contact-flow-arn`;
 export const CUSTOMER_QUEUE_PROMPT_ID = '666650f7-db8f-435f-bc27-77644f59f6bb';
-export const RECORDINGS_PREFIX = 'call-recordings/';
-export const VOICEMAIL_RECORDING_KEY_PATTERN = `${RECORDINGS_PREFIX}*ivr/*.wav`;
+export const REQUEST_CATEGORY_FIELD_ID = '137be1e8-7eac-4741-9a3b-18aedbdcf77b';
+
+const ESCALATION_REASON_OPTIONS = [
+  'complex_request',
+  'technical_issue',
+  'customer_frustration',
+  'policy_exception',
+  'out_of_scope',
+  'other',
+].map((value) => ({ name: value, value }));
 
 const WEEKDAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'] as const;
 
@@ -86,6 +88,49 @@ function templateOverride(
     jsonPath,
     value: { constant: { type, value } },
   };
+}
+
+function singleSelectOptions(
+  stack: cdk.Stack,
+  id: string,
+  domainId: string,
+  fieldId: string,
+  fieldArn: string,
+  physicalId: string,
+  options: ReadonlyArray<{ readonly name: string; readonly value: string }>,
+): cr.AwsCustomResource {
+  const call = (active: boolean): cr.AwsSdkCall => ({
+    service: 'ConnectCases',
+    action: 'BatchPutFieldOptions',
+    parameters: {
+      domainId,
+      fieldId,
+      options: options.map((option) => ({ ...option, active })),
+    },
+    physicalResourceId: cr.PhysicalResourceId.of(physicalId),
+  });
+  return new cr.AwsCustomResource(stack, id, {
+    installLatestAwsSdk: true,
+    onCreate: call(true),
+    onUpdate: call(true),
+    onDelete: {
+      ...call(false),
+      ignoreErrorCodesMatching: 'ValidationException',
+    },
+    policy: cr.AwsCustomResourcePolicy.fromStatements([
+      new iam.PolicyStatement({
+        actions: ['cases:BatchPutFieldOptions'],
+        resources: [
+          stack.formatArn({
+            service: 'cases',
+            resource: 'domain',
+            resourceName: domainId,
+          }),
+          fieldArn,
+        ],
+      }),
+    ]),
+  });
 }
 
 function orchestrationTools(): wisdom.CfnAIAgent.ToolConfigurationProperty[] {
@@ -225,15 +270,10 @@ export class ConnectStack extends cdk.Stack {
       this,
       `${SANDBOX_PARAMETER_PREFIX}/assistant-id`,
     );
-    const storageBucketName = ssm.StringParameter.valueForStringParameter(
-      this,
-      `${SANDBOX_PARAMETER_PREFIX}/storage-bucket`,
-    );
     const casesDomainId = ssm.StringParameter.valueForStringParameter(
       this,
       `${SANDBOX_PARAMETER_PREFIX}/cases-domain-id`,
     );
-    const storageBucket = s3.Bucket.fromBucketName(this, 'StorageBucket', storageBucketName);
 
     const prompts = new connect.CfnDataTable(this, 'PromptsByChannel', {
       instanceArn,
@@ -270,7 +310,8 @@ export class ConnectStack extends cdk.Stack {
       ['Goodbye', 'CHAT', 'Thanks for chatting with Harbor Ridge 311. Goodbye.'],
       ['Question', 'VOICE', 'What can I help you with? You can ask about trash pickup, potholes, parking permits, or office hours. Say agent if you would rather talk to a person.'],
       ['Question', 'CHAT', 'What can I help you with? You can ask about trash pickup, potholes, parking permits, or office hours, or type agent to reach a person.'],
-      ['AfterHours', 'CHAT', AFTER_HOURS_CHAT_TEXT],
+      ['AfterHoursCase', 'CHAT', AFTER_HOURS_CASE_CHAT_TEXT],
+      ['AfterHoursCase', 'VOICE', AFTER_HOURS_CASE_VOICE_TEXT],
       ['Queue', 'CHAT', QUEUE_CHAT_TEXT],
       ['Queue', 'VOICE', QUEUE_VOICE_TEXT],
     ].map(([prompt, channel, text]) => new connect.CfnDataTableRecord(this, `${prompt}${channel}`, {
@@ -757,178 +798,6 @@ export class ConnectStack extends cdk.Stack {
     });
 
     const dataTableId = cdk.Fn.select(3, cdk.Fn.split('/', prompts.attrArn));
-    const afterHours = new connect.CfnContactFlow(this, 'AfterHoursFlow', {
-      instanceArn,
-      name: 'HarborRidge311-AfterHours',
-      type: 'CONTACT_FLOW',
-      content: cdk.Fn.toJsonString(afterHoursFlow({ dataTableId })),
-    });
-    const queueFlow = new connect.CfnContactFlow(this, 'QueueFlow', {
-      instanceArn,
-      name: 'HarborRidge311-Queue',
-      type: 'CUSTOMER_QUEUE',
-      content: cdk.Fn.toJsonString(customerQueueFlow({
-        dataTableId,
-        holdMusicPromptArn: cdk.Fn.join('', [instanceArn, '/prompt/', CUSTOMER_QUEUE_PROMPT_ID]),
-      })),
-    });
-    const promptRow = (id: string) => {
-      const found = promptRows.find((record) => record.node.id === id);
-      if (!found) {
-        throw new Error(`missing prompt row ${id}`);
-      }
-      return found;
-    };
-    afterHours.node.addDependency(promptRow('AfterHoursCHAT'));
-    queueFlow.node.addDependency(promptRow('QueueCHAT'), promptRow('QueueVOICE'));
-
-    const escalationGuide = new connect.CfnContactFlow(this, 'EscalationGuide', {
-      instanceArn,
-      name: 'HarborRidge311-EscalationGuide',
-      type: 'CONTACT_FLOW',
-      content: cdk.Fn.toJsonString(escalationGuideFlow({
-        detailViewArn: cdk.Fn.join('', [
-          'arn:',
-          cdk.Aws.PARTITION,
-          ':connect:',
-          cdk.Aws.REGION,
-          ':aws:view/detail:1',
-        ]),
-      })),
-    });
-
-    const flow = new connect.CfnContactFlow(this, 'MainFlow', {
-      instanceArn,
-      name: 'HarborRidge311-Main',
-      type: 'CONTACT_FLOW',
-      content: cdk.Fn.toJsonString(mainFlow({
-        dataTableId,
-        wisdomAssistantArn: assistantArn,
-        lexBotAliasArn: botAlias.attrArn,
-        orchestratorLambdaArn: selectOrchestrator.functionArn,
-        hoursOfOperationArn: hoursOfOperation.attrHoursOfOperationArn,
-        afterHoursFlowArn: afterHours.attrContactFlowArn,
-        queueArn: queue.attrQueueArn,
-        escalationGuideFlowArn: escalationGuide.attrContactFlowArn,
-        customerQueueFlowArn: queueFlow.attrContactFlowArn,
-      })),
-    });
-    flow.node.addDependency(...promptRows, lexAssociation, orchestratorAssociation);
-    setDefaultAgent.node.addDependency(botAlias, flow);
-    const mainContactFlowId = cdk.Fn.select(3, cdk.Fn.split('/', flow.attrContactFlowArn));
-    new ssm.StringParameter(this, 'MainContactFlowIdParameter', {
-      parameterName: MAIN_CONTACT_FLOW_ID_PARAMETER,
-      stringValue: mainContactFlowId,
-    }).applyRemovalPolicy(cdk.RemovalPolicy.DESTROY);
-    new ssm.StringParameter(this, 'MainContactFlowArnParameter', {
-      parameterName: MAIN_CONTACT_FLOW_ARN_PARAMETER,
-      stringValue: flow.attrContactFlowArn,
-    }).applyRemovalPolicy(cdk.RemovalPolicy.DESTROY);
-
-    const associateCall: cr.AwsSdkCall = {
-      service: 'connect',
-      action: 'AssociatePhoneNumberContactFlow',
-      parameters: {
-        PhoneNumberId: phoneNumberArn,
-        InstanceId: instanceId,
-        ContactFlowId: flow.attrContactFlowArn,
-      },
-      physicalResourceId: cr.PhysicalResourceId.of('HarborRidge311-Main'),
-    };
-
-    new cr.AwsCustomResource(this, 'AssociatePhoneNumber', {
-      onCreate: associateCall,
-      onUpdate: associateCall,
-      onDelete: {
-        service: 'connect',
-        action: 'DisassociatePhoneNumberContactFlow',
-        parameters: {
-          PhoneNumberId: phoneNumberArn,
-          InstanceId: instanceId,
-        },
-      },
-      policy: cr.AwsCustomResourcePolicy.fromStatements([
-        new iam.PolicyStatement({
-          actions: ['connect:AssociatePhoneNumberContactFlow'],
-          resources: [instanceArn, flow.attrContactFlowArn, phoneNumberArn],
-        }),
-        new iam.PolicyStatement({
-          actions: ['connect:DisassociatePhoneNumberContactFlow'],
-          resources: [instanceArn, phoneNumberArn],
-        }),
-      ]),
-    });
-
-    const voicemails = new dynamodb.Table(this, 'Voicemails', {
-      tableName: 'HarborRidge311-Voicemails',
-      partitionKey: { name: 'contactId', type: dynamodb.AttributeType.STRING },
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
-      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: false },
-      timeToLiveAttribute: 'expiresAt',
-    });
-
-    const voicemailLogGroup = new logs.LogGroup(this, 'VoicemailIndexerLogs', {
-      logGroupName: '/aws/lambda/HarborRidge311-VoicemailIndexer',
-      retention: logs.RetentionDays.ONE_WEEK,
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
-    });
-    const voicemailRole = new iam.Role(this, 'VoicemailIndexerRole', {
-      assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
-    });
-    voicemailRole.addToPolicy(new iam.PolicyStatement({
-      actions: ['logs:CreateLogStream', 'logs:PutLogEvents'],
-      resources: [cdk.Fn.join('', [voicemailLogGroup.logGroupArn, ':*'])],
-    }));
-    const voicemailFailures = new sqs.Queue(this, 'VoicemailIndexerFailures', {
-      queueName: 'HarborRidge311-VoicemailIndexerFailures',
-      retentionPeriod: cdk.Duration.days(14),
-      encryption: sqs.QueueEncryption.SQS_MANAGED,
-    });
-    const voicemailIndexer = new nodejs.NodejsFunction(this, 'VoicemailIndexer', {
-      runtime: lambda.Runtime.NODEJS_22_X,
-      entry: path.join(__dirname, 'voicemail-handler.ts'),
-      handler: 'handler',
-      timeout: cdk.Duration.seconds(30),
-      functionName: 'HarborRidge311-VoicemailIndexer',
-      logGroup: voicemailLogGroup,
-      role: voicemailRole,
-      onFailure: new destinations.SqsDestination(voicemailFailures),
-      environment: {
-        TABLE_NAME: voicemails.tableName,
-        BUCKET_NAME: storageBucket.bucketName,
-        INSTANCE_ID: instanceId,
-      },
-    });
-    voicemailIndexer.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['s3:GetObject'],
-      resources: [storageBucket.arnForObjects(`${RECORDINGS_PREFIX}*`)],
-    }));
-    voicemailIndexer.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['connect:DescribeContact', 'connect:GetContactAttributes'],
-      resources: [cdk.Fn.join('', [instanceArn, '/contact/*'])],
-    }));
-    voicemailIndexer.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['dynamodb:PutItem'],
-      resources: [voicemails.tableArn],
-    }));
-
-    new events.Rule(this, 'VoicemailRecordingCreated', {
-      eventPattern: {
-        source: ['aws.s3'],
-        detailType: ['Object Created'],
-        detail: {
-          bucket: {
-            name: [storageBucket.bucketName],
-          },
-          object: {
-            key: events.Match.wildcard(VOICEMAIL_RECORDING_KEY_PATTERN),
-          },
-        },
-      },
-      targets: [new targets.LambdaFunction(voicemailIndexer)],
-    });
-
     const requestCategory = new cases.CfnField(this, 'RequestCategory', {
       domainId: casesDomainId,
       name: 'Request category',
@@ -980,39 +849,126 @@ export class ConnectStack extends cdk.Stack {
       { name: 'Parking permit', value: 'parking-permit' },
       { name: 'Other', value: 'other' },
     ];
-    const categoryOptionCall = (active: boolean): cr.AwsSdkCall => ({
-      service: 'ConnectCases',
-      action: 'BatchPutFieldOptions',
-      parameters: {
-        domainId: casesDomainId,
-        fieldId: requestCategory.attrFieldId,
-        options: categoryOptions.map((option) => ({ ...option, active })),
-      },
-      physicalResourceId: cr.PhysicalResourceId.of('HarborRidge311-RequestCategory'),
+    const requestCategoryOptions = singleSelectOptions(
+      this,
+      'RequestCategoryOptions',
+      casesDomainId,
+      requestCategory.attrFieldId,
+      requestCategory.attrFieldArn,
+      'HarborRidge311-RequestCategory',
+      categoryOptions,
+    );
+    const caseReasonFieldArn = this.formatArn({
+      service: 'cases',
+      resource: 'domain',
+      resourceName: cdk.Fn.join('/', [casesDomainId, 'field', 'case_reason']),
     });
-    const requestCategoryOptions = new cr.AwsCustomResource(this, 'RequestCategoryOptions', {
-      installLatestAwsSdk: true,
-      onCreate: categoryOptionCall(true),
-      onUpdate: categoryOptionCall(true),
+    const caseReasonOptions = singleSelectOptions(
+      this,
+      'CaseReasonOptions',
+      casesDomainId,
+      'case_reason',
+      caseReasonFieldArn,
+      'HarborRidge311-CaseReason',
+      ESCALATION_REASON_OPTIONS,
+    );
+    serviceRequest.node.addDependency(requestCategoryOptions);
+
+    const queueFlow = new connect.CfnContactFlow(this, 'QueueFlow', {
+      instanceArn,
+      name: 'HarborRidge311-Queue',
+      type: 'CUSTOMER_QUEUE',
+      content: cdk.Fn.toJsonString(customerQueueFlow({
+        dataTableId,
+        holdMusicPromptArn: cdk.Fn.join('', [instanceArn, '/prompt/', CUSTOMER_QUEUE_PROMPT_ID]),
+      })),
+    });
+    const promptRow = (id: string) => {
+      const found = promptRows.find((record) => record.node.id === id);
+      if (!found) {
+        throw new Error(`missing prompt row ${id}`);
+      }
+      return found;
+    };
+    queueFlow.node.addDependency(promptRow('QueueCHAT'), promptRow('QueueVOICE'));
+
+    const escalationGuide = new connect.CfnContactFlow(this, 'EscalationGuide', {
+      instanceArn,
+      name: 'HarborRidge311-EscalationGuide',
+      type: 'CONTACT_FLOW',
+      content: cdk.Fn.toJsonString(escalationGuideFlow({
+        detailViewArn: cdk.Fn.join('', [
+          'arn:',
+          cdk.Aws.PARTITION,
+          ':connect:',
+          cdk.Aws.REGION,
+          ':aws:view/detail:1',
+        ]),
+      })),
+    });
+
+    const flow = new connect.CfnContactFlow(this, 'MainFlow', {
+      instanceArn,
+      name: 'HarborRidge311-Main',
+      type: 'CONTACT_FLOW',
+      content: cdk.Fn.toJsonString(mainFlow({
+        dataTableId,
+        wisdomAssistantArn: assistantArn,
+        lexBotAliasArn: botAlias.attrArn,
+        orchestratorLambdaArn: selectOrchestrator.functionArn,
+        hoursOfOperationArn: hoursOfOperation.attrHoursOfOperationArn,
+        queueArn: queue.attrQueueArn,
+        escalationGuideFlowArn: escalationGuide.attrContactFlowArn,
+        customerQueueFlowArn: queueFlow.attrContactFlowArn,
+        caseTemplateId: serviceRequest.attrTemplateId,
+        requestCategoryFieldId: REQUEST_CATEGORY_FIELD_ID,
+      })),
+    });
+    flow.node.addDependency(...promptRows, lexAssociation, orchestratorAssociation, caseReasonOptions);
+    setDefaultAgent.node.addDependency(botAlias, flow);
+    const mainContactFlowId = cdk.Fn.select(3, cdk.Fn.split('/', flow.attrContactFlowArn));
+    new ssm.StringParameter(this, 'MainContactFlowIdParameter', {
+      parameterName: MAIN_CONTACT_FLOW_ID_PARAMETER,
+      stringValue: mainContactFlowId,
+    }).applyRemovalPolicy(cdk.RemovalPolicy.DESTROY);
+    new ssm.StringParameter(this, 'MainContactFlowArnParameter', {
+      parameterName: MAIN_CONTACT_FLOW_ARN_PARAMETER,
+      stringValue: flow.attrContactFlowArn,
+    }).applyRemovalPolicy(cdk.RemovalPolicy.DESTROY);
+
+    const associateCall: cr.AwsSdkCall = {
+      service: 'connect',
+      action: 'AssociatePhoneNumberContactFlow',
+      parameters: {
+        PhoneNumberId: phoneNumberArn,
+        InstanceId: instanceId,
+        ContactFlowId: flow.attrContactFlowArn,
+      },
+      physicalResourceId: cr.PhysicalResourceId.of('HarborRidge311-Main'),
+    };
+
+    new cr.AwsCustomResource(this, 'AssociatePhoneNumber', {
+      onCreate: associateCall,
+      onUpdate: associateCall,
       onDelete: {
-        ...categoryOptionCall(false),
-        ignoreErrorCodesMatching: 'ValidationException',
+        service: 'connect',
+        action: 'DisassociatePhoneNumberContactFlow',
+        parameters: {
+          PhoneNumberId: phoneNumberArn,
+          InstanceId: instanceId,
+        },
       },
       policy: cr.AwsCustomResourcePolicy.fromStatements([
         new iam.PolicyStatement({
-          actions: ['cases:BatchPutFieldOptions'],
-          resources: [
-            this.formatArn({
-              service: 'cases',
-              resource: 'domain',
-              resourceName: casesDomainId,
-            }),
-            requestCategory.attrFieldArn,
-          ],
+          actions: ['connect:AssociatePhoneNumberContactFlow'],
+          resources: [instanceArn, flow.attrContactFlowArn, phoneNumberArn],
+        }),
+        new iam.PolicyStatement({
+          actions: ['connect:DisassociatePhoneNumberContactFlow'],
+          resources: [instanceArn, phoneNumberArn],
         }),
       ]),
     });
-    serviceRequest.node.addDependency(requestCategoryOptions);
 
     new cdk.CfnOutput(this, 'ContactFlowArn', {
       value: flow.attrContactFlowArn,

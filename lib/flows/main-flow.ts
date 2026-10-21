@@ -8,8 +8,8 @@ interface FlowError {
 interface FlowCondition {
   NextAction: string;
   Condition: {
-    Operator: 'Equals';
-    Operands: [string];
+    Operator: 'Equals' | 'Exists';
+    Operands: string[];
   };
 }
 
@@ -40,16 +40,23 @@ export interface MainFlowProps {
   lexBotAliasArn: string;
   orchestratorLambdaArn: string;
   hoursOfOperationArn: string;
-  afterHoursFlowArn: string;
   queueArn: string;
   escalationGuideFlowArn: string;
   customerQueueFlowArn: string;
+  caseTemplateId: string;
+  requestCategoryFieldId: string;
 }
 
 const VOICE_GREETING = 'Thank you for calling Harbor Ridge 3 1 1. This line is a demo.';
 const VOICE_GOODBYE = 'Thank you for calling Harbor Ridge 3 1 1. Goodbye.';
 
-function promptQuery(prompt: 'Greeting' | 'Goodbye' | 'Question') {
+export const CASE_REFERENCE_ATTRIBUTE = '$.Case.reference_number';
+export const AFTER_HOURS_CASE_CHAT_TEXT = `Harbor Ridge 311 is closed right now, so we've logged your request. Your reference number is ${CASE_REFERENCE_ATTRIBUTE}. Our team works Monday to Friday, 8 a.m. to 5 p.m. Pacific and will follow up then.`;
+export const AFTER_HOURS_CASE_VOICE_TEXT = `Harbor Ridge 3 1 1 is closed right now, so we have logged your request. Your reference number is ${CASE_REFERENCE_ATTRIBUTE}. Our team works Monday to Friday, 8 a.m. to 5 p.m. Pacific and will follow up then.`;
+export const AFTER_HOURS_CLOSED_TEXT = 'Harbor Ridge 311 is closed right now. Our team is available Monday to Friday, 8 a.m. to 5 p.m. Pacific.';
+const FALLBACK_CASE_TITLE = 'After-hours escalation';
+
+function promptQuery(prompt: 'Greeting' | 'Goodbye' | 'Question' | 'AfterHoursCase') {
   return {
     QueryName: prompt,
     Attributes: ['Text'],
@@ -62,6 +69,13 @@ function promptQuery(prompt: 'Greeting' | 'Goodbye' | 'Question') {
 
 function errorTo(nextAction: string): FlowError[] {
   return [{ ErrorType: 'NoMatchingError', NextAction: nextAction }];
+}
+
+function exists(nextAction: string): FlowCondition {
+  return {
+    NextAction: nextAction,
+    Condition: { Operator: 'Exists', Operands: [] },
+  };
 }
 
 export function mainFlow(props: MainFlowProps): ContactFlowContent {
@@ -87,7 +101,16 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
         'set-working-queue': { position: { x: 3240, y: 640 } },
         'set-customer-queue': { position: { x: 3520, y: 640 } },
         'transfer-to-queue': { position: { x: 3800, y: 640 } },
-        'transfer-after-hours': { position: { x: 2960, y: 920 } },
+        'create-profile': { position: { x: 2960, y: 920 } },
+        'check-case-title': { position: { x: 3240, y: 920 } },
+        'set-case-title': { position: { x: 3520, y: 920 } },
+        'set-fallback-title': { position: { x: 3520, y: 1200 } },
+        'create-case': { position: { x: 3800, y: 920 } },
+        'get-case': { position: { x: 4080, y: 920 } },
+        'lookup-after-hours-case': { position: { x: 4360, y: 920 } },
+        'check-case-prompt': { position: { x: 4640, y: 920 } },
+        'play-case-reference': { position: { x: 4920, y: 920 } },
+        'play-closed': { position: { x: 3240, y: 1200 } },
         disconnect: { position: { x: 3240, y: 360 } },
       },
     },
@@ -249,11 +272,11 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
               Condition: { Operator: 'Equals', Operands: ['True'] },
             },
             {
-              NextAction: 'transfer-after-hours',
+              NextAction: 'create-profile',
               Condition: { Operator: 'Equals', Operands: ['False'] },
             },
           ],
-          Errors: errorTo('transfer-after-hours'),
+          Errors: errorTo('create-profile'),
         },
       },
       {
@@ -310,10 +333,151 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
         },
       },
       {
-        Identifier: 'transfer-after-hours',
-        Type: 'TransferToFlow',
+        Identifier: 'create-profile',
+        Type: 'CreateCustomerProfile',
         Parameters: {
-          ContactFlowId: props.afterHoursFlowArn,
+          ProfileRequestData: {},
+        },
+        Transitions: {
+          NextAction: 'check-case-title',
+          Errors: errorTo('play-closed'),
+          Conditions: [],
+        },
+      },
+      {
+        Identifier: 'check-case-title',
+        Type: 'Compare',
+        Parameters: {
+          ComparisonValue: '$.Attributes.customerIntent',
+        },
+        Transitions: {
+          NextAction: 'set-fallback-title',
+          Conditions: [exists('set-case-title')],
+          Errors: [
+            { ErrorType: 'NoMatchingCondition', NextAction: 'set-fallback-title' },
+          ],
+        },
+      },
+      {
+        Identifier: 'set-case-title',
+        Type: 'UpdateContactAttributes',
+        Parameters: {
+          Attributes: {
+            caseTitle: '$.Attributes.customerIntent',
+          },
+          TargetContact: 'Current',
+        },
+        Transitions: {
+          NextAction: 'create-case',
+          Errors: errorTo('set-fallback-title'),
+          Conditions: [],
+        },
+      },
+      {
+        Identifier: 'set-fallback-title',
+        Type: 'UpdateContactAttributes',
+        Parameters: {
+          Attributes: {
+            caseTitle: FALLBACK_CASE_TITLE,
+          },
+          TargetContact: 'Current',
+        },
+        Transitions: {
+          NextAction: 'create-case',
+          Errors: errorTo('play-closed'),
+          Conditions: [],
+        },
+      },
+      {
+        Identifier: 'create-case',
+        Type: 'CreateCase',
+        Parameters: {
+          LinkContactToCase: 'true',
+          CaseTemplateId: props.caseTemplateId,
+          CaseRequestFields: {
+            customer_id: '$.Customer.ProfileARN',
+            title: '$.Attributes.caseTitle',
+            summary: '$.Attributes.escalationSummary',
+            case_reason: '$.Attributes.escalationReason',
+            [props.requestCategoryFieldId]: 'other',
+            status: 'open',
+          },
+        },
+        Transitions: {
+          NextAction: 'get-case',
+          Errors: [
+            { ErrorType: 'ContactNotLinked', NextAction: 'play-closed' },
+            { ErrorType: 'NoMatchingError', NextAction: 'play-closed' },
+          ],
+          Conditions: [],
+        },
+      },
+      {
+        Identifier: 'get-case',
+        Type: 'GetCase',
+        Parameters: {
+          LinkContactToCase: 'false',
+          GetLastUpdatedCase: 'true',
+          CustomerId: '$.Customer.ProfileARN',
+          CaseRequestFields: {
+            case_id: '$.Case.case_id',
+          },
+          CaseResponseFields: ['reference_number'],
+        },
+        Transitions: {
+          NextAction: 'lookup-after-hours-case',
+          Errors: [
+            { ErrorType: 'NoMatchingError', NextAction: 'play-closed' },
+            { ErrorType: 'NoneFound', NextAction: 'play-closed' },
+            { ErrorType: 'MultipleFound', NextAction: 'play-closed' },
+          ],
+          Conditions: [],
+        },
+      },
+      {
+        Identifier: 'lookup-after-hours-case',
+        Type: 'EvaluateDataTableValues',
+        Parameters: {
+          DataTableId: props.dataTableId,
+          Queries: [promptQuery('AfterHoursCase')],
+        },
+        Transitions: {
+          NextAction: 'check-case-prompt',
+          Errors: errorTo('play-closed'),
+          Conditions: [],
+        },
+      },
+      {
+        Identifier: 'check-case-prompt',
+        Type: 'Compare',
+        Parameters: {
+          ComparisonValue: '$.DataTables.AfterHoursCase.Text',
+        },
+        Transitions: {
+          NextAction: 'play-closed',
+          Conditions: [exists('play-case-reference')],
+          Errors: [
+            { ErrorType: 'NoMatchingCondition', NextAction: 'play-closed' },
+          ],
+        },
+      },
+      {
+        Identifier: 'play-case-reference',
+        Type: 'MessageParticipant',
+        Parameters: {
+          Text: '$.DataTables.AfterHoursCase.Text',
+        },
+        Transitions: {
+          NextAction: 'disconnect',
+          Errors: errorTo('play-closed'),
+          Conditions: [],
+        },
+      },
+      {
+        Identifier: 'play-closed',
+        Type: 'MessageParticipant',
+        Parameters: {
+          Text: AFTER_HOURS_CLOSED_TEXT,
         },
         Transitions: {
           NextAction: 'disconnect',

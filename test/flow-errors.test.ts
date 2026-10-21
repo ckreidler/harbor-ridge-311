@@ -1,13 +1,10 @@
-import { AFTER_HOURS_CHAT_TEXT, afterHoursFlow } from '../lib/flows/after-hours-flow';
 import { escalationGuideFlow } from '../lib/flows/escalation-guide-flow';
-import { mainFlow } from '../lib/flows/main-flow';
+import { AFTER_HOURS_CLOSED_TEXT, mainFlow } from '../lib/flows/main-flow';
 import { customerQueueFlow, QUEUE_CHAT_TEXT, QUEUE_VOICE_TEXT } from '../lib/flows/queue-flow';
 
 const allowedErrors: Record<string, readonly string[]> = {
   UpdateFlowLoggingBehavior: [],
   CheckHoursOfOperation: ['NoMatchingError'],
-  TransferToFlow: ['NoMatchingError'],
-  GetParticipantInput: ['InputTimeLimitExceeded', 'NoMatchingCondition', 'NoMatchingError'],
   UpdateContactTextToSpeechVoice: ['NoMatchingError'],
   EvaluateDataTableValues: ['NoMatchingError'],
   MessageParticipant: ['NoMatchingError'],
@@ -17,13 +14,15 @@ const allowedErrors: Record<string, readonly string[]> = {
   InvokeLambdaFunction: ['NoMatchingError'],
   DisconnectParticipant: [],
   UpdateContactAttributes: ['NoMatchingError'],
-  UpdateContactRecordingBehavior: [],
   UpdateContactEventHooks: ['NoMatchingError'],
   UpdateContactTargetQueue: ['NoMatchingError'],
   TransferContactToQueue: ['QueueAtCapacity', 'NoMatchingError'],
   ShowView: ['NoMatchingError', 'NoMatchingCondition', 'TimeLimitExceeded'],
   Wait: ['NoMatchingError'],
   MessageParticipantIteratively: ['NoMatchingError'],
+  CreateCustomerProfile: ['NoMatchingError'],
+  CreateCase: ['ContactNotLinked', 'NoMatchingError'],
+  GetCase: ['NoMatchingError', 'NoneFound', 'MultipleFound', 'ContactNotLinked'],
 };
 
 const flowProps = {
@@ -32,13 +31,13 @@ const flowProps = {
   lexBotAliasArn: 'alias',
   orchestratorLambdaArn: 'orchestrator',
   hoursOfOperationArn: 'hours',
-  afterHoursFlowArn: 'after-hours',
   queueArn: 'queue',
   escalationGuideFlowArn: 'escalation-guide',
   customerQueueFlowArn: 'queue-flow',
+  caseTemplateId: 'template',
+  requestCategoryFieldId: '137be1e8-7eac-4741-9a3b-18aedbdcf77b',
 };
 
-const afterHoursProps = { dataTableId: 'table' };
 const queueProps = { dataTableId: 'table', holdMusicPromptArn: 'hold-music' };
 
 function reachable(flow: ReturnType<typeof mainFlow>, start: string): Set<string> {
@@ -72,7 +71,6 @@ const detailViewArn = 'arn:aws:connect:us-west-2:aws:view/detail:1';
 test('flow actions only use error branches their action type allows', () => {
   const flows = [
     mainFlow(flowProps),
-    afterHoursFlow(afterHoursProps),
     customerQueueFlow(queueProps),
     escalationGuideFlow({ detailViewArn }),
   ];
@@ -97,19 +95,11 @@ test('flow actions only use error branches their action type allows', () => {
       }
     }
   }
-
-  const recording = afterHoursFlow(afterHoursProps).Actions.find((action) => action.Type === 'UpdateContactRecordingBehavior');
-  expect(recording?.Transitions).toEqual({
-    NextAction: 'leave-message',
-    Errors: [],
-    Conditions: [],
-  });
 });
 
 test('compare conditions do not use an empty-string operand', () => {
   const flows = [
     mainFlow(flowProps),
-    afterHoursFlow(afterHoursProps),
     customerQueueFlow(queueProps),
     escalationGuideFlow({ detailViewArn }),
   ];
@@ -254,7 +244,7 @@ test('in-hours escalation sets the agent guide before transferring to the queue'
   expect(block('check-hours').Parameters.HoursOfOperationId).toBe('hours');
   expect(block('check-hours').Transitions.NextAction).toBe('set-event-flow');
   expect(next('check-hours', 'True')).toBe('set-event-flow');
-  expect(next('check-hours', 'False')).toBe('transfer-after-hours');
+  expect(next('check-hours', 'False')).toBe('create-profile');
   expect(block('set-escalation').Transitions.NextAction).toBe('check-hours');
   expect(next('check-tool', 'Escalate')).toBe('set-escalation');
   expect(block('set-event-flow')).toMatchObject({
@@ -316,10 +306,8 @@ test('in-hours escalation sets the agent guide before transferring to the queue'
   }
 });
 
-const VOICE_CLOSED_PROMPT = 'Thank you for calling Harbor Ridge 3 1 1. Our office is closed. Please leave a message after the tone, and hang up when you are finished.';
-
-test('chat after hours never reaches a recording block and voice after hours is unchanged', () => {
-  const flow = afterHoursFlow(afterHoursProps);
+test('after-hours escalation creates a case, speaks the reference, and disconnects', () => {
+  const flow = mainFlow(flowProps);
   const block = (identifier: string) => {
     const found = flow.Actions.find((action) => action.Identifier === identifier);
     if (!found) {
@@ -327,61 +315,66 @@ test('chat after hours never reaches a recording block and voice after hours is 
     }
     return found;
   };
-  const chat = reachable(flow, 'lookup-closed');
-  const voice = reachable(flow, 'set-voice');
+  const closed = reachable(flow, 'create-profile');
+  const open = reachable(flow, 'set-event-flow');
 
-  expect(flow.StartAction).toBe('branch-channel');
-  expect(flow.Actions.filter((action) => action.Type === 'Compare')).toHaveLength(1);
-  expect(block('branch-channel')).toMatchObject({
-    Parameters: { ComparisonValue: '$.Channel' },
-    Transitions: {
-      NextAction: 'set-voice',
-      Conditions: [
-        { NextAction: 'lookup-closed', Condition: { Operator: 'Equals', Operands: ['CHAT'] } },
-      ],
-      Errors: [{ ErrorType: 'NoMatchingCondition', NextAction: 'set-voice' }],
+  expect(closed.has('disconnect')).toBe(true);
+  expect(closed.has('play-closed')).toBe(true);
+  expect(closed.has('create-case')).toBe(true);
+  expect(closed.has('get-case')).toBe(true);
+  expect(closed.has('play-case-reference')).toBe(true);
+  expect(closed.has('transfer-to-queue')).toBe(false);
+  expect(closed.has('set-event-flow')).toBe(false);
+  expect(open.has('create-profile')).toBe(false);
+  expect(open.has('create-case')).toBe(false);
+
+  expect(block('create-profile').Transitions.Errors).toEqual([
+    { ErrorType: 'NoMatchingError', NextAction: 'play-closed' },
+  ]);
+  expect(block('create-case').Parameters).toMatchObject({
+    LinkContactToCase: 'true',
+    CaseTemplateId: 'template',
+    CaseRequestFields: {
+      customer_id: '$.Customer.ProfileARN',
+      title: '$.Attributes.caseTitle',
+      summary: '$.Attributes.escalationSummary',
+      case_reason: '$.Attributes.escalationReason',
+      '137be1e8-7eac-4741-9a3b-18aedbdcf77b': 'other',
+      status: 'open',
     },
   });
-  expect(chat.has('start-recording')).toBe(false);
-  expect(chat.has('leave-message')).toBe(false);
-  expect(chat.has('set-voicemail')).toBe(false);
-  expect(chat.has('set-voice')).toBe(false);
-  expect(chat.has('play-closed')).toBe(false);
-  expect([...chat].sort()).toEqual(['disconnect', 'lookup-closed', 'play-closed-chat', 'play-closed-fallback']);
-  expect(block('lookup-closed')).toMatchObject({
-    Type: 'EvaluateDataTableValues',
-    Parameters: {
-      DataTableId: 'table',
-      Queries: [{
-        QueryName: 'AfterHours',
-        Attributes: ['Text'],
-        PrimaryValues: [
-          { AttributeName: 'Prompt', Value: 'AfterHours' },
-          { AttributeName: 'Channel', Value: '$.Channel' },
-        ],
-      }],
-    },
-    Transitions: {
-      NextAction: 'play-closed-chat',
-      Errors: [{ ErrorType: 'NoMatchingError', NextAction: 'play-closed-fallback' }],
-    },
+  expect(block('create-case').Transitions.Errors?.every((error) => error.NextAction === 'play-closed')).toBe(true);
+  expect(block('get-case').Parameters).toMatchObject({
+    LinkContactToCase: 'false',
+    GetLastUpdatedCase: 'true',
+    CustomerId: '$.Customer.ProfileARN',
+    CaseResponseFields: ['reference_number'],
   });
-  expect(block('play-closed-chat').Parameters.Text).toBe('$.DataTables.AfterHours.Text');
-  expect(block('play-closed-chat').Transitions.NextAction).toBe('disconnect');
-  expect(block('play-closed-fallback').Parameters.Text).toBe('Harbor Ridge 311 is closed right now.');
-  expect(block('play-closed-fallback').Transitions.NextAction).toBe('disconnect');
-  expect(JSON.stringify(flow)).not.toContain(AFTER_HOURS_CHAT_TEXT);
+  expect(block('get-case').Transitions.Errors?.every((error) => error.NextAction === 'play-closed')).toBe(true);
+  expect(block('play-case-reference').Parameters.Text).toBe('$.DataTables.AfterHoursCase.Text');
+  expect(block('play-case-reference').Transitions.NextAction).toBe('disconnect');
+  expect(block('play-closed').Parameters.Text).toBe(AFTER_HOURS_CLOSED_TEXT);
+  expect(block('play-closed').Transitions).toMatchObject({
+    NextAction: 'disconnect',
+    Errors: [{ ErrorType: 'NoMatchingError', NextAction: 'disconnect' }],
+  });
+  expect(block('check-case-title').Transitions.Conditions?.[0].Condition.Operands).toEqual([]);
+  expect(block('check-case-prompt').Transitions.Conditions?.[0].Condition.Operator).toBe('Exists');
+  expect(flow.Actions.some((action) => action.Type === 'TransferToFlow')).toBe(false);
+  expect(flow.Actions.some((action) => action.Type === 'UpdateContactRecordingBehavior')).toBe(false);
 
-  expect(voice.has('lookup-closed')).toBe(false);
-  expect(voice.has('play-closed-chat')).toBe(false);
-  expect(block('set-voice').Transitions.NextAction).toBe('set-voicemail');
-  expect(block('set-voicemail').Transitions.NextAction).toBe('play-closed');
-  expect(block('play-closed').Parameters.Text).toBe(VOICE_CLOSED_PROMPT);
-  expect(block('play-closed').Transitions.NextAction).toBe('start-recording');
-  expect(block('start-recording').Transitions.NextAction).toBe('leave-message');
-  expect(block('leave-message').Parameters.InputTimeLimitSeconds).toBe('60');
-  expect(block('leave-message').Transitions.NextAction).toBe('disconnect');
-  expect(JSON.stringify(block('set-voicemail').Parameters)).toContain('"Voicemail":"true"');
+  const ids = flow.Actions.map((action) => action.Identifier);
+  for (let left = 0; left < ids.length; left += 1) {
+    for (let right = left + 1; right < ids.length; right += 1) {
+      const a = flow.Metadata.ActionMetadata[ids[left]].position;
+      const b = flow.Metadata.ActionMetadata[ids[right]].position;
+      const dx = Math.abs(a.x - b.x);
+      const dy = Math.abs(a.y - b.y);
+      expect(dx >= 280 || dy >= 280).toBe(true);
+      expect(a.x % 280).toBe(160 % 280);
+      expect(b.x % 280).toBe(160 % 280);
+    }
+  }
 });
 
 test('customer queue flow covers chat and voice', () => {
@@ -459,7 +452,6 @@ test('customer queue flow covers chat and voice', () => {
 test('wait actions use TimeLimitSeconds', () => {
   const flows = [
     mainFlow(flowProps),
-    afterHoursFlow(afterHoursProps),
     customerQueueFlow(queueProps),
     escalationGuideFlow({ detailViewArn }),
   ];
@@ -478,8 +470,8 @@ test('wait actions use TimeLimitSeconds', () => {
   }
 });
 
-test('queue and after-hours blocks sit on a 280 pixel grid', () => {
-  for (const flow of [afterHoursFlow(afterHoursProps), customerQueueFlow(queueProps)]) {
+test('queue blocks sit on a 280 pixel grid', () => {
+  for (const flow of [customerQueueFlow(queueProps)]) {
     const ids = flow.Actions.map((action) => action.Identifier);
     expect(new Set(Object.keys(flow.Metadata.ActionMetadata))).toEqual(new Set(ids));
     for (let left = 0; left < ids.length; left += 1) {
