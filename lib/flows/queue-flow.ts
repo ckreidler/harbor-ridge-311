@@ -36,13 +36,13 @@ interface ContactFlowContent {
 
 export interface CustomerQueueFlowProps {
   dataTableId: string;
+  holdMusicPromptArn: string;
 }
 
 export const QUEUE_CHAT_TEXT = 'Thanks for waiting. You\'re in line and the next available person will join this chat shortly.';
 export const QUEUE_VOICE_TEXT = 'Thanks for waiting. The next available person will be with you shortly.';
 
 const CHAT_WAIT_SECONDS = '180';
-const HOLD_GAP_SSML = `<speak>${'<break time="10s"/>'.repeat(12)}</speak>`;
 
 function errorTo(nextAction: string): FlowError[] {
   return [{ ErrorType: 'NoMatchingError', NextAction: nextAction }];
@@ -59,14 +59,14 @@ function promptQuery(queryName: string) {
   };
 }
 
-function holdLoop(identifier: string, text: string): FlowAction {
+function holdLoop(identifier: string, text: string, holdMusicPromptArn: string): FlowAction {
   return {
     Identifier: identifier,
     Type: 'MessageParticipantIteratively',
     Parameters: {
       Messages: [
         { Text: text },
-        { SSML: HOLD_GAP_SSML },
+        { PromptId: holdMusicPromptArn },
       ],
     },
     Transitions: {
@@ -153,7 +153,7 @@ export function customerQueueFlow(props: CustomerQueueFlowProps): ContactFlowCon
         Identifier: 'wait-in-queue',
         Type: 'Wait',
         Parameters: {
-          TimeoutSeconds: CHAT_WAIT_SECONDS,
+          TimeLimitSeconds: CHAT_WAIT_SECONDS,
         },
         Transitions: {
           NextAction: 'wait-in-queue',
@@ -179,8 +179,8 @@ export function customerQueueFlow(props: CustomerQueueFlowProps): ContactFlowCon
           Conditions: [],
         },
       },
-      holdLoop('loop-hold', '$.DataTables.QueueVoice.Text'),
-      holdLoop('loop-hold-fallback', QUEUE_VOICE_TEXT),
+      holdLoop('loop-hold', '$.DataTables.QueueVoice.Text', props.holdMusicPromptArn),
+      holdLoop('loop-hold-fallback', QUEUE_VOICE_TEXT, props.holdMusicPromptArn),
     ],
   };
 }

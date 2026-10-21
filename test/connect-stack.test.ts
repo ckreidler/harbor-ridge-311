@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import * as cdk from 'aws-cdk-lib/core';
-import { ConnectStack, VOICEMAIL_RECORDING_KEY_PATTERN } from '../lib/connect-stack';
+import { ConnectStack, CUSTOMER_QUEUE_PROMPT_ID, VOICEMAIL_RECORDING_KEY_PATTERN } from '../lib/connect-stack';
 import { AFTER_HOURS_CHAT_TEXT } from '../lib/flows/after-hours-flow';
 import { QUEUE_CHAT_TEXT, QUEUE_VOICE_TEXT } from '../lib/flows/queue-flow';
 
@@ -1063,6 +1063,18 @@ test('ConnectStack transfers an in-hours escalation and keeps the agent password
     .toBe(true);
   expect(queueDocument.Actions.some((action) => action.Identifier === 'wait-in-queue' && action.Type === 'Wait'))
     .toBe(true);
+  const queueRaw = JSON.stringify(queueFlow.Properties.Content);
+  const instanceArnParameter = Object.entries(template.toJSON().Parameters as Record<string, { Default?: string }>)
+    .find(([, parameter]) => parameter.Default === '/connect/sandbox/instance-arn')?.[0];
+  expect(instanceArnParameter).toBeDefined();
+  expect(queueRaw).toContain(CUSTOMER_QUEUE_PROMPT_ID);
+  expect(queueRaw).toContain('/prompt/');
+  expect(queueRaw).toContain(`"Ref":"${instanceArnParameter}"`);
+  expect(queueRaw).toContain('Fn::Join');
+  expect(queueRaw).not.toContain('Fn::Sub');
+  expect(queueRaw).not.toContain('TimeoutSeconds');
+  expect(queueRaw).toContain('TimeLimitSeconds');
+  expect(queueRaw).not.toContain('<break');
   expect(mainRaw).toContain('CustomerQueue');
   expect(mainRaw).toContain('QueueFlow');
 

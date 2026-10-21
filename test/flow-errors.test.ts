@@ -39,7 +39,7 @@ const flowProps = {
 };
 
 const afterHoursProps = { dataTableId: 'table' };
-const queueProps = { dataTableId: 'table' };
+const queueProps = { dataTableId: 'table', holdMusicPromptArn: 'hold-music' };
 
 function reachable(flow: ReturnType<typeof mainFlow>, start: string): Set<string> {
   const seen = new Set<string>();
@@ -410,8 +410,16 @@ test('customer queue flow covers chat and voice', () => {
   expect(block('play-queue-chat').Transitions.NextAction).toBe('wait-in-queue');
   expect(block('wait-in-queue')).toMatchObject({
     Type: 'Wait',
-    Parameters: { TimeoutSeconds: '180' },
-    Transitions: { NextAction: 'wait-in-queue' },
+    Parameters: { TimeLimitSeconds: '180' },
+    Transitions: {
+      NextAction: 'wait-in-queue',
+      Conditions: [
+        {
+          NextAction: 'wait-in-queue',
+          Condition: { Operator: 'Equals', Operands: ['WaitCompleted'] },
+        },
+      ],
+    },
   });
   expect(block('wait-in-queue').Transitions.NextAction).not.toBe('play-queue-chat');
   expect(block('lookup-queue-chat').Parameters.Queries).toEqual([{
@@ -434,16 +442,40 @@ test('customer queue flow covers chat and voice', () => {
     Type: 'MessageParticipantIteratively',
     Transitions: { NextAction: 'loop-hold' },
   });
-  const messages = block('loop-hold').Parameters.Messages as Array<{ Text?: string; SSML?: string; PromptId?: string }>;
-  expect(messages[0]?.Text).toBe('$.DataTables.QueueVoice.Text');
-  expect(messages[1]?.SSML).toContain('<break time="10s"/>');
-  expect(messages.some((message) => message.PromptId)).toBe(false);
+  expect(block('loop-hold').Parameters.Messages).toEqual([
+    { Text: '$.DataTables.QueueVoice.Text' },
+    { PromptId: 'hold-music' },
+  ]);
   expect(block('loop-hold-fallback').Parameters.Messages).toEqual([
     { Text: QUEUE_VOICE_TEXT },
-    { SSML: messages[1]?.SSML },
+    { PromptId: 'hold-music' },
   ]);
+  expect(JSON.stringify(flow)).not.toContain('SSML');
+  expect(JSON.stringify(flow)).not.toContain('666650f7-db8f-435f-bc27-77644f59f6bb');
   expect(block('play-queue-fallback').Parameters.Text).toBe(QUEUE_CHAT_TEXT);
   expect(JSON.stringify(flow)).not.toContain('Thank you for calling');
+});
+
+test('wait actions use TimeLimitSeconds', () => {
+  const flows = [
+    mainFlow(flowProps),
+    afterHoursFlow(afterHoursProps),
+    customerQueueFlow(queueProps),
+    escalationGuideFlow({ detailViewArn }),
+  ];
+  const waits = flows.flatMap((flow) => flow.Actions.filter((action) => action.Type === 'Wait'));
+  expect(waits.length).toBeGreaterThan(0);
+  for (const wait of waits) {
+    expect(wait.Parameters.TimeLimitSeconds).toBe('180');
+    expect(Object.keys(wait.Parameters)).not.toContain('TimeoutSeconds');
+    expect(JSON.stringify(wait)).not.toContain('TimeoutSeconds');
+    expect(wait.Transitions.Conditions).toEqual([
+      {
+        NextAction: wait.Identifier,
+        Condition: { Operator: 'Equals', Operands: ['WaitCompleted'] },
+      },
+    ]);
+  }
 });
 
 test('queue and after-hours blocks sit on a 280 pixel grid', () => {

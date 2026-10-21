@@ -31,6 +31,7 @@ import { SELF_SERVICE_USE_CASE } from './select-orchestrator';
 export const SANDBOX_PARAMETER_PREFIX = '/connect/sandbox';
 export const MAIN_CONTACT_FLOW_ID_PARAMETER = `${SANDBOX_PARAMETER_PREFIX}/harbor-ridge-311/main-contact-flow-id`;
 export const MAIN_CONTACT_FLOW_ARN_PARAMETER = `${SANDBOX_PARAMETER_PREFIX}/harbor-ridge-311/main-contact-flow-arn`;
+export const CUSTOMER_QUEUE_PROMPT_ID = '666650f7-db8f-435f-bc27-77644f59f6bb';
 export const RECORDINGS_PREFIX = 'call-recordings/';
 export const VOICEMAIL_RECORDING_KEY_PATTERN = `${RECORDINGS_PREFIX}*ivr/*.wav`;
 
@@ -766,7 +767,10 @@ export class ConnectStack extends cdk.Stack {
       instanceArn,
       name: 'HarborRidge311-Queue',
       type: 'CUSTOMER_QUEUE',
-      content: cdk.Fn.toJsonString(customerQueueFlow({ dataTableId })),
+      content: cdk.Fn.toJsonString(customerQueueFlow({
+        dataTableId,
+        holdMusicPromptArn: cdk.Fn.join('', [instanceArn, '/prompt/', CUSTOMER_QUEUE_PROMPT_ID]),
+      })),
     });
     const promptRow = (id: string) => {
       const found = promptRows.find((record) => record.node.id === id);
