@@ -88,9 +88,19 @@ test('ConnectStack looks up the English prompts and associates the sandbox numbe
   template.resourceCountIs('AWS::Connect::DataTableRecord', 6);
 
   template.hasResourceProperties('AWS::Connect::DataTable', {
-    Name: 'HarborRidge311-Prompts',
+    Name: 'HarborRidge311-PromptsByChannel',
     Status: 'PUBLISHED',
   });
+  expect(Object.keys(template.findResources('AWS::Connect::DataTable'))).toEqual(['PromptsByChannel']);
+  const tableChildren = JSON.stringify({
+    ...template.findResources('AWS::Connect::DataTableAttribute'),
+    ...template.findResources('AWS::Connect::DataTableRecord'),
+  });
+  expect(tableChildren).toContain('PromptsByChannel');
+  expect(tableChildren).not.toContain('"Prompts"');
+  const parameters = JSON.stringify(template.findResources('AWS::SSM::Parameter'));
+  expect(parameters).not.toContain('Prompts');
+  expect(parameters).not.toContain('DataTable');
   const attributes = template.findResources('AWS::Connect::DataTableAttribute') as Record<string, {
     Properties: { Name: string; Primary?: boolean; ValueType: string };
   }>;
@@ -146,6 +156,7 @@ test('ConnectStack looks up the English prompts and associates the sandbox numbe
   expect(JSON.stringify(content)).not.toContain('español');
   expect(JSON.stringify(content)).not.toContain('$.Attributes.language');
 
+  expect(JSON.stringify(flow.Properties.Content)).toContain('PromptsByChannel');
   expect(JSON.stringify(flow.Properties.Content)).toContain('$.Channel');
   const lookup = content.Actions.find((action) => action.Type === 'EvaluateDataTableValues');
   expect(lookup?.Parameters?.Queries).toEqual(['Greeting', 'Goodbye', 'Question'].map((prompt) => ({
@@ -714,6 +725,7 @@ test('ConnectStack records an after-hours voicemail when the office is closed', 
 
   const afterHours = contactFlow(template, 'HarborRidge311-AfterHours');
   expect(afterHours.Properties.Type).toBe('CONTACT_FLOW');
+  expect(JSON.stringify(afterHours.Properties.Content)).not.toContain('DataTable');
   const closed = flowDocument(afterHours.Properties.Content);
   expect(closed.Actions.map((action) => action.Identifier).every((id) => closed.Metadata.ActionMetadata[id]?.position))
     .toBe(true);

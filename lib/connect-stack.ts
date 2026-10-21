@@ -231,9 +231,9 @@ export class ConnectStack extends cdk.Stack {
     );
     const storageBucket = s3.Bucket.fromBucketName(this, 'StorageBucket', storageBucketName);
 
-    const prompts = new connect.CfnDataTable(this, 'Prompts', {
+    const prompts = new connect.CfnDataTable(this, 'PromptsByChannel', {
       instanceArn,
-      name: 'HarborRidge311-Prompts',
+      name: 'HarborRidge311-PromptsByChannel',
       status: 'PUBLISHED',
       timeZone: 'America/New_York',
       valueLockLevel: 'NONE',
