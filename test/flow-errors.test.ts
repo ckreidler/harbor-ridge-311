@@ -1,4 +1,5 @@
 import { afterHoursFlow } from '../lib/flows/after-hours-flow';
+import { escalationGuideFlow } from '../lib/flows/escalation-guide-flow';
 import { mainFlow } from '../lib/flows/main-flow';
 
 const allowedErrors: Record<string, readonly string[]> = {
@@ -16,19 +17,30 @@ const allowedErrors: Record<string, readonly string[]> = {
   DisconnectParticipant: [],
   UpdateContactAttributes: ['NoMatchingError'],
   UpdateContactRecordingBehavior: [],
+  UpdateContactEventHooks: ['NoMatchingError'],
+  UpdateContactTargetQueue: ['NoMatchingError'],
+  TransferContactToQueue: ['QueueAtCapacity', 'NoMatchingError'],
+  ShowView: ['NoMatchingError', 'NoMatchingCondition', 'TimeLimitExceeded'],
 };
+
+const flowProps = {
+  dataTableId: 'table',
+  wisdomAssistantArn: 'assistant',
+  lexBotAliasArn: 'alias',
+  orchestratorLambdaArn: 'orchestrator',
+  hoursOfOperationArn: 'hours',
+  afterHoursFlowArn: 'after-hours',
+  queueArn: 'queue',
+  escalationGuideFlowArn: 'escalation-guide',
+};
+
+const detailViewArn = 'arn:aws:connect:us-west-2:aws:view/detail:1';
 
 test('flow actions only use error branches their action type allows', () => {
   const flows = [
-    mainFlow({
-      dataTableId: 'table',
-      wisdomAssistantArn: 'assistant',
-      lexBotAliasArn: 'alias',
-      orchestratorLambdaArn: 'orchestrator',
-      hoursOfOperationArn: 'hours',
-      afterHoursFlowArn: 'after-hours',
-    }),
+    mainFlow(flowProps),
     afterHoursFlow(),
+    escalationGuideFlow({ detailViewArn }),
   ];
 
   for (const flow of flows) {
@@ -60,17 +72,8 @@ test('flow actions only use error branches their action type allows', () => {
   });
 });
 
-const flowProps = {
-  dataTableId: 'table',
-  wisdomAssistantArn: 'assistant',
-  lexBotAliasArn: 'alias',
-  orchestratorLambdaArn: 'orchestrator',
-  hoursOfOperationArn: 'hours',
-  afterHoursFlowArn: 'after-hours',
-};
-
 test('compare conditions do not use an empty-string operand', () => {
-  const flows = [mainFlow(flowProps), afterHoursFlow()];
+  const flows = [mainFlow(flowProps), afterHoursFlow(), escalationGuideFlow({ detailViewArn })];
   for (const flow of flows) {
     for (const action of flow.Actions) {
       if (action.Type !== 'Compare') {
@@ -192,4 +195,65 @@ test('main flow looks up prompt text by channel and plays the greeting on succes
     'Thank you for calling Harbor Ridge 3 1 1. This line is a demo. Thank you for calling Harbor Ridge 3 1 1. Goodbye.',
   );
   expect(block('select-orchestrator').Parameters.InvocationTimeLimitSeconds).toBe('8');
+});
+
+test('in-hours escalation sets the agent guide before transferring to the queue', () => {
+  const flow = mainFlow(flowProps);
+  const block = (identifier: string) => {
+    const found = flow.Actions.find((action) => action.Identifier === identifier);
+    if (!found) {
+      throw new Error(`missing ${identifier}`);
+    }
+    return found;
+  };
+  const next = (identifier: string, operand: string) =>
+    block(identifier).Transitions.Conditions?.find((branch) => branch.Condition.Operands[0] === operand)?.NextAction;
+
+  expect(flow.Actions.some((action) => action.Identifier === 'play-agent-placeholder')).toBe(false);
+  expect(JSON.stringify(flow)).not.toContain('play-agent-placeholder');
+  expect(JSON.stringify(flow)).not.toContain('This is where we would escalate to an agent.');
+  expect(block('check-hours').Parameters.HoursOfOperationId).toBe('hours');
+  expect(block('check-hours').Transitions.NextAction).toBe('set-event-flow');
+  expect(next('check-hours', 'True')).toBe('set-event-flow');
+  expect(next('check-hours', 'False')).toBe('transfer-after-hours');
+  expect(block('set-escalation').Transitions.NextAction).toBe('check-hours');
+  expect(next('check-tool', 'Escalate')).toBe('set-escalation');
+  expect(block('set-event-flow')).toMatchObject({
+    Type: 'UpdateContactEventHooks',
+    Parameters: { EventHooks: { DefaultAgentUI: 'escalation-guide' } },
+    Transitions: {
+      NextAction: 'set-working-queue',
+      Errors: [{ ErrorType: 'NoMatchingError', NextAction: 'play-goodbye' }],
+    },
+  });
+  expect(block('set-working-queue')).toMatchObject({
+    Type: 'UpdateContactTargetQueue',
+    Parameters: { QueueId: 'queue' },
+    Transitions: {
+      NextAction: 'transfer-to-queue',
+      Errors: [{ ErrorType: 'NoMatchingError', NextAction: 'play-goodbye' }],
+    },
+  });
+  expect(block('transfer-to-queue')).toMatchObject({
+    Type: 'TransferContactToQueue',
+    Parameters: {},
+    Transitions: {
+      NextAction: 'play-goodbye',
+      Errors: [
+        { ErrorType: 'QueueAtCapacity', NextAction: 'play-goodbye' },
+        { ErrorType: 'NoMatchingError', NextAction: 'play-goodbye' },
+      ],
+    },
+  });
+  expect(flow.Actions.filter((action) => action.Type === 'CreateWisdomSession')).toHaveLength(1);
+  expect(block('create-assistant-session').Transitions.NextAction).toBe('select-orchestrator');
+
+  const guide = escalationGuideFlow({ detailViewArn });
+  const show = guide.Actions.find((action) => action.Identifier === 'show-escalation');
+  const view = JSON.stringify(show);
+  expect(show?.Type).toBe('ShowView');
+  expect(view).toContain(detailViewArn);
+  for (const attribute of ['escalationReason', 'escalationSummary', 'customerIntent', 'sentiment']) {
+    expect(view).toContain(`$.Attributes.${attribute}`);
+  }
 });

@@ -41,6 +41,8 @@ export interface MainFlowProps {
   orchestratorLambdaArn: string;
   hoursOfOperationArn: string;
   afterHoursFlowArn: string;
+  queueArn: string;
+  escalationGuideFlowArn: string;
 }
 
 const VOICE_GREETING = 'Thank you for calling Harbor Ridge 3 1 1. This line is a demo.';
@@ -80,7 +82,9 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
         'play-goodbye': { position: { x: 2400, y: 80 } },
         'set-escalation': { position: { x: 2400, y: 640 } },
         'check-hours': { position: { x: 2680, y: 640 } },
-        'play-agent-placeholder': { position: { x: 2960, y: 640 } },
+        'set-event-flow': { position: { x: 2960, y: 640 } },
+        'set-working-queue': { position: { x: 3240, y: 640 } },
+        'transfer-to-queue': { position: { x: 3520, y: 640 } },
         'transfer-after-hours': { position: { x: 2960, y: 920 } },
         disconnect: { position: { x: 3240, y: 360 } },
       },
@@ -236,10 +240,10 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
           HoursOfOperationId: props.hoursOfOperationArn,
         },
         Transitions: {
-          NextAction: 'play-agent-placeholder',
+          NextAction: 'set-event-flow',
           Conditions: [
             {
-              NextAction: 'play-agent-placeholder',
+              NextAction: 'set-event-flow',
               Condition: { Operator: 'Equals', Operands: ['True'] },
             },
             {
@@ -251,14 +255,41 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
         },
       },
       {
-        Identifier: 'play-agent-placeholder',
-        Type: 'MessageParticipant',
+        Identifier: 'set-event-flow',
+        Type: 'UpdateContactEventHooks',
         Parameters: {
-          Text: 'This is where we would escalate to an agent.',
+          EventHooks: {
+            DefaultAgentUI: props.escalationGuideFlowArn,
+          },
         },
         Transitions: {
-          NextAction: 'disconnect',
-          Errors: errorTo('disconnect'),
+          NextAction: 'set-working-queue',
+          Errors: errorTo('play-goodbye'),
+          Conditions: [],
+        },
+      },
+      {
+        Identifier: 'set-working-queue',
+        Type: 'UpdateContactTargetQueue',
+        Parameters: {
+          QueueId: props.queueArn,
+        },
+        Transitions: {
+          NextAction: 'transfer-to-queue',
+          Errors: errorTo('play-goodbye'),
+          Conditions: [],
+        },
+      },
+      {
+        Identifier: 'transfer-to-queue',
+        Type: 'TransferContactToQueue',
+        Parameters: {},
+        Transitions: {
+          NextAction: 'play-goodbye',
+          Errors: [
+            { ErrorType: 'QueueAtCapacity', NextAction: 'play-goodbye' },
+            { ErrorType: 'NoMatchingError', NextAction: 'play-goodbye' },
+          ],
           Conditions: [],
         },
       },
