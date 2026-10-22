@@ -1,3 +1,5 @@
+import { create } from '@amazon-connect-touchpoint/web';
+
 (function () {
   var config = window.HARBOR_RIDGE_TOUCHPOINT;
   var status = document.getElementById('contact-status');
@@ -25,11 +27,6 @@
       setStatus('Chat and calling are not configured on this page yet.');
       return;
     }
-    var sdk = window.amazonConnectTouchpoint;
-    if (!sdk || typeof sdk.create !== 'function') {
-      setStatus('The contact widget did not load.');
-      return;
-    }
     if (current && mode === nextMode) {
       current.expanded = true;
       return;
@@ -48,7 +45,7 @@
         current = null;
         mode = null;
       }
-      var touchpoint = await sdk.create({
+      var touchpoint = await create({
         config: {
           chatEndpoint: config.chatEndpoint,
           voiceEndpoint: config.voiceEndpoint,

@@ -10,7 +10,12 @@ import { Construct } from 'constructs';
 
 export function stageWebsite(): string {
   const root = path.join(__dirname, '..');
-  execFileSync(process.execPath, [path.join(root, 'scripts/build-site.mjs')], {
+  execFileSync(process.execPath, [
+    path.join(root, 'node_modules/vite/bin/vite.js'),
+    'build',
+    '--config',
+    path.join(root, 'website/vite.config.mjs'),
+  ], {
     cwd: root,
   });
   return path.join(root, '.website-build');

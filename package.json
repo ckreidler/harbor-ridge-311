@@ -2,8 +2,8 @@
   "name": "harbor-ridge-311",
   "version": "0.1.0",
   "scripts": {
-    "build": "tsc && node scripts/build-site.mjs",
-    "build:site": "node scripts/build-site.mjs",
+    "build": "tsc && vite build --config website/vite.config.mjs",
+    "build:site": "vite build --config website/vite.config.mjs",
     "watch": "tsc -w",
     "test": "jest",
     "cdk": "cdk",
@@ -17,7 +17,8 @@
     "aws-cdk": "2.1141.0",
     "jest": "^30",
     "tsx": "^4.23.0",
-    "typescript": "~7.0.2"
+    "typescript": "~7.0.2",
+    "vite": "^8.3.5"
   },
   "dependencies": {
     "@amazon-connect-touchpoint/web": "1.0.5-3",

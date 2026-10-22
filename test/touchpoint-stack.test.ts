@@ -5,19 +5,32 @@ import { Match, Template } from 'aws-cdk-lib/assertions';
 import * as cdk from 'aws-cdk-lib/core';
 import { ConnectStack, MAIN_CONTACT_FLOW_ARN_PARAMETER, MAIN_CONTACT_FLOW_ID_PARAMETER } from '../lib/connect-stack';
 import { TouchpointStack } from '../lib/touchpoint-stack';
-import { WebsiteStack } from '../lib/website-stack';
+import { stageWebsite, WebsiteStack } from '../lib/website-stack';
 
-const root = path.join(__dirname, '..');
-
-test('site build copies the Touchpoint bundle next to the page', () => {
-  execFileSync(process.execPath, [path.join(root, 'scripts/build-site.mjs')], { cwd: root });
-  const built = path.join(root, '.website-build');
-  const bundle = fs.readFileSync(path.join(built, 'touchpoint.umd.js'), 'utf8');
-  expect(bundle).toContain('amazonConnectTouchpoint');
-  expect(bundle.length).toBeGreaterThan(100_000);
-  execFileSync(process.execPath, ['--check', path.join(built, 'launch.js')]);
-  expect(fs.readFileSync(path.join(built, 'index.html'), 'utf8')).toContain('config.js');
+test('site build bundles the Touchpoint SDK and leaves config.js out', () => {
+  const built = stageWebsite();
+  const index = fs.readFileSync(path.join(built, 'index.html'), 'utf8');
+  expect(index).toMatch(/<script\s+src="\/config\.js"\s*><\/script>/);
+  expect(index).not.toContain('touchpoint.umd.js');
   expect(fs.existsSync(path.join(built, 'config.js'))).toBe(false);
+  expect(fs.existsSync(path.join(built, 'touchpoint.umd.js'))).toBe(false);
+  const notFound = fs.readFileSync(path.join(built, '404.html'), 'utf8');
+  expect(notFound).toContain('href="/"');
+  for (const html of [index, notFound]) {
+    const cssHref = html.match(/href="(\/[^"]+\.css)"/);
+    expect(cssHref).not.toBeNull();
+    expect(fs.existsSync(path.join(built, cssHref![1].slice(1)))).toBe(true);
+  }
+  const moduleSrc = index.match(/<script type="module"[^>]*\ssrc="(\/[^"]+\.js)"/);
+  expect(moduleSrc).not.toBeNull();
+  const bundlePath = path.join(built, moduleSrc![1].slice(1));
+  execFileSync(process.execPath, ['--check', bundlePath]);
+  const bundle = fs.readFileSync(bundlePath, 'utf8');
+  expect(bundle).toContain('Opening chat');
+  expect(bundle).toContain('voiceMini');
+  expect(bundle).toContain('#0f6e6b');
+  expect(bundle).toContain('Harbor Ridge visitor');
+  expect(bundle.length).toBeGreaterThan(100_000);
 });
 
 test('TouchpointStack publishes throttled chat and voice routes for the main flow', () => {
