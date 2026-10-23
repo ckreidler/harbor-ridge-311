@@ -99,8 +99,30 @@ test('TouchpointStack publishes throttled chat and voice routes for the main flo
     }),
   });
 
-  const deployment = JSON.stringify(site.findResources('Custom::CDKBucketDeployment'));
-  expect(deployment).toContain('config.js');
+  const deployments = Object.values(site.findResources('Custom::CDKBucketDeployment')) as Array<{
+    Properties: {
+      Prune?: boolean;
+      Exclude?: string[];
+      DestinationBucketKeyPrefix?: string;
+      DistributionPaths?: string[];
+      SystemMetadata?: { 'cache-control'?: string };
+    };
+  }>;
+  expect(deployments).toHaveLength(2);
+  const html = deployments.find((deployment) => deployment.Properties.SystemMetadata?.['cache-control'] === 'no-cache');
+  const assets = deployments.find((deployment) => deployment.Properties.DestinationBucketKeyPrefix === 'assets');
+  expect(html?.Properties).toMatchObject({
+    Prune: true,
+    DistributionPaths: ['/*'],
+    SystemMetadata: { 'cache-control': 'no-cache' },
+  });
+  expect(html?.Properties.Exclude).toEqual(expect.arrayContaining(['config.js', 'assets/*']));
+  expect(assets?.Properties).toMatchObject({
+    Prune: true,
+    DestinationBucketKeyPrefix: 'assets',
+    SystemMetadata: { 'cache-control': 'public, max-age=31536000, immutable' },
+  });
+  expect(JSON.stringify(assets?.Properties)).not.toContain('config.js');
   const siteResources = site.toJSON().Resources as Record<string, { DeletionPolicy?: string; UpdateReplacePolicy?: string }>;
   for (const resource of Object.values(siteResources)) {
     expect(resource.DeletionPolicy).not.toBe('Retain');

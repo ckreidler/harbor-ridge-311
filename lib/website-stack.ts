@@ -68,18 +68,32 @@ export class WebsiteStack extends cdk.Stack {
       ],
     });
 
+    const siteDir = stageWebsite();
     const deployLogs = new logs.LogGroup(this, 'DeploySiteLogs', {
       retention: logs.RetentionDays.ONE_WEEK,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
-    new s3deploy.BucketDeployment(this, 'DeploySite', {
-      sources: [s3deploy.Source.asset(stageWebsite())],
+    const assetDeploy = new s3deploy.BucketDeployment(this, 'DeploySiteAssets', {
+      sources: [s3deploy.Source.asset(path.join(siteDir, 'assets'))],
+      destinationBucket: siteBucket,
+      destinationKeyPrefix: 'assets',
+      cacheControl: [
+        s3deploy.CacheControl.setPublic(),
+        s3deploy.CacheControl.maxAge(cdk.Duration.seconds(31536000)),
+        s3deploy.CacheControl.immutable(),
+      ],
+      logGroup: deployLogs,
+    });
+    const htmlDeploy = new s3deploy.BucketDeployment(this, 'DeploySiteHtml', {
+      sources: [s3deploy.Source.asset(siteDir, { exclude: ['assets/**', 'config.js'] })],
       destinationBucket: siteBucket,
       distribution,
       distributionPaths: ['/*'],
-      exclude: ['config.js'],
+      exclude: ['config.js', 'assets/*'],
+      cacheControl: [s3deploy.CacheControl.noCache()],
       logGroup: deployLogs,
     });
+    htmlDeploy.node.addDependency(assetDeploy);
     this.siteBucket = siteBucket;
     this.distribution = distribution;
     this.siteOrigin = `https://${distribution.distributionDomainName}`;
