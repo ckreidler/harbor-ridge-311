@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
@@ -10,9 +11,12 @@ import { Construct } from 'constructs';
 
 export function stageWebsite(): string {
   const root = path.join(__dirname, '..');
-  execFileSync(process.execPath, [path.join(root, 'scripts/build-site.mjs')], {
-    cwd: root,
-  });
+  const website = path.join(root, 'website');
+  const viteBin = path.join(website, 'node_modules/vite/bin/vite.js');
+  if (!existsSync(viteBin)) {
+    throw new Error('Missing website dependencies. Run npm ci --prefix website');
+  }
+  execFileSync(process.execPath, [viteBin, 'build'], { cwd: website });
   return path.join(root, '.website-build');
 }
 
@@ -64,18 +68,32 @@ export class WebsiteStack extends cdk.Stack {
       ],
     });
 
+    const siteDir = stageWebsite();
     const deployLogs = new logs.LogGroup(this, 'DeploySiteLogs', {
       retention: logs.RetentionDays.ONE_WEEK,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
-    new s3deploy.BucketDeployment(this, 'DeploySite', {
-      sources: [s3deploy.Source.asset(stageWebsite())],
+    const assetDeploy = new s3deploy.BucketDeployment(this, 'DeploySiteAssets', {
+      sources: [s3deploy.Source.asset(path.join(siteDir, 'assets'))],
+      destinationBucket: siteBucket,
+      destinationKeyPrefix: 'assets',
+      cacheControl: [
+        s3deploy.CacheControl.setPublic(),
+        s3deploy.CacheControl.maxAge(cdk.Duration.seconds(31536000)),
+        s3deploy.CacheControl.immutable(),
+      ],
+      logGroup: deployLogs,
+    });
+    const htmlDeploy = new s3deploy.BucketDeployment(this, 'DeploySiteHtml', {
+      sources: [s3deploy.Source.asset(siteDir, { exclude: ['assets/**', 'config.js'] })],
       destinationBucket: siteBucket,
       distribution,
       distributionPaths: ['/*'],
-      exclude: ['config.js'],
+      exclude: ['config.js', 'assets/*'],
+      cacheControl: [s3deploy.CacheControl.noCache()],
       logGroup: deployLogs,
     });
+    htmlDeploy.node.addDependency(assetDeploy);
     this.siteBucket = siteBucket;
     this.distribution = distribution;
     this.siteOrigin = `https://${distribution.distributionDomainName}`;
