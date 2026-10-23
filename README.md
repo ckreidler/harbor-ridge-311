@@ -6,6 +6,8 @@ The `cdk.json` file tells the CDK Toolkit how to execute your app.
 
 ## Website
 
+`website/` is its own npm package. Vite and `@amazon-connect-touchpoint/web` live there, not in the CDK app. Root `npm ci` installs the CDK app, then installs the site package. To install the site package alone, run `npm ci --prefix website`. Synth, tests, and deploy need that install. If `website/node_modules` is missing, the site build stops and tells you to run that command.
+
 `WebsiteStack` builds `website/` with Vite when the stack is synthesized, then deploys that output to a private S3 bucket behind CloudFront. The built page loads `/config.js` as a classic script and loads the page module separately. The module is deferred, so `/config.js` runs first. `TouchpointStack` writes `config.js` into the same bucket at deploy time. The site deployment excludes `config.js`, so a site deploy does not delete that file.
 
 `npm run build` type-checks the CDK app and builds the site. `npm run build:site` builds only the site.

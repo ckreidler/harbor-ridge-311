@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
@@ -10,14 +11,12 @@ import { Construct } from 'constructs';
 
 export function stageWebsite(): string {
   const root = path.join(__dirname, '..');
-  execFileSync(process.execPath, [
-    path.join(root, 'node_modules/vite/bin/vite.js'),
-    'build',
-    '--config',
-    path.join(root, 'website/vite.config.mjs'),
-  ], {
-    cwd: root,
-  });
+  const website = path.join(root, 'website');
+  const viteBin = path.join(website, 'node_modules/vite/bin/vite.js');
+  if (!existsSync(viteBin)) {
+    throw new Error('Missing website dependencies. Run npm ci --prefix website');
+  }
+  execFileSync(process.execPath, [viteBin, 'build'], { cwd: website });
   return path.join(root, '.website-build');
 }
 
