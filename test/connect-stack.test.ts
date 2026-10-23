@@ -33,6 +33,12 @@ interface FlowAction {
       Attributes: string[];
       PrimaryValues: Array<{ AttributeName: string; Value: string }>;
     }>;
+    DataTableId?: string;
+    ThirdPartyPhoneNumber?: string;
+    ThirdPartyConnectionTimeLimitSeconds?: string;
+    ContinueFlowExecution?: string;
+    CallerId?: { Number?: string; Name?: string };
+    LexSessionAttributes?: Record<string, string>;
   };
   Transitions?: {
     NextAction?: string;
@@ -91,15 +97,20 @@ test('ConnectStack looks up the English prompts and associates the sandbox numbe
   const template = Template.fromStack(new ConnectStack(app, 'ConnectStack'));
 
   template.resourceCountIs('AWS::Connect::ContactFlow', 3);
-  template.resourceCountIs('AWS::Connect::DataTable', 1);
-  template.resourceCountIs('AWS::Connect::DataTableAttribute', 4);
+  template.resourceCountIs('AWS::Connect::DataTable', 2);
+  template.resourceCountIs('AWS::Connect::DataTableAttribute', 6);
   template.resourceCountIs('AWS::Connect::DataTableRecord', 10);
 
   template.hasResourceProperties('AWS::Connect::DataTable', {
     Name: 'HarborRidge311-PromptsByChannel',
     Status: 'PUBLISHED',
   });
-  expect(Object.keys(template.findResources('AWS::Connect::DataTable'))).toEqual(['PromptsByChannel']);
+  template.hasResourceProperties('AWS::Connect::DataTable', {
+    Name: 'HarborRidge311-OnCall',
+    Status: 'PUBLISHED',
+    TimeZone: 'America/New_York',
+  });
+  expect(Object.keys(template.findResources('AWS::Connect::DataTable')).sort()).toEqual(['OnCall', 'PromptsByChannel']);
   const tableChildren = JSON.stringify({
     ...template.findResources('AWS::Connect::DataTableAttribute'),
     ...template.findResources('AWS::Connect::DataTableRecord'),
@@ -123,6 +134,9 @@ test('ConnectStack looks up the English prompts and associates the sandbox numbe
   expect(attributeByName.TextAfter).toMatchObject({ ValueType: 'TEXT' });
   expect(attributeByName.TextAfter.Primary).toBeUndefined();
   expect(attributeByName.Language).toBeUndefined();
+  expect(attributeByName.Key).toMatchObject({ Primary: true, ValueType: 'TEXT' });
+  expect(attributeByName.Phone).toMatchObject({ ValueType: 'TEXT' });
+  expect(attributeByName.Phone.Primary).toBeUndefined();
 
   const recordResources = template.findResources('AWS::Connect::DataTableRecord') as Record<string, {
     Properties: {
@@ -137,7 +151,7 @@ test('ConnectStack looks up the English prompts and associates the sandbox numbe
     text: record.Properties.DataTableRecord.Values.map((value) => value.AttributeValue),
   }));
   expect(rows).toEqual(expect.arrayContaining([
-    { key: ['Greeting', 'VOICE'], text: ['Thank you for calling Harbor Ridge 3 1 1. This line is a demo.'] },
+    { key: ['Greeting', 'VOICE'], text: ["If you're reporting an outage, press 1 at any time. Thank you for calling Harbor Ridge 3 1 1. This line is a demo."] },
     { key: ['CHAT', 'Greeting'], text: ['Welcome to Harbor Ridge 311 chat. This is a demo.'] },
     { key: ['Goodbye', 'VOICE'], text: ['Thank you for calling Harbor Ridge 3 1 1. Goodbye.'] },
     { key: ['CHAT', 'Goodbye'], text: ['Thanks for chatting with Harbor Ridge 311. Goodbye.'] },
@@ -160,6 +174,7 @@ test('ConnectStack looks up the English prompts and associates the sandbox numbe
   expect(records).not.toContain('en-US');
   expect(records).not.toContain('es-US');
   expect(records).not.toContain('Gracias');
+  expect(records).not.toContain('OnCall');
 
   const flow = contactFlow(template, 'HarborRidge311-Main');
   expect(flow.Properties.Type).toBe('CONTACT_FLOW');
@@ -173,7 +188,7 @@ test('ConnectStack looks up the English prompts and associates the sandbox numbe
 
   expect(JSON.stringify(flow.Properties.Content)).toContain('PromptsByChannel');
   expect(JSON.stringify(flow.Properties.Content)).toContain('$.Channel');
-  const lookup = content.Actions.find((action) => action.Type === 'EvaluateDataTableValues');
+  const lookup = content.Actions.find((action) => action.Identifier === 'lookup-prompts');
   expect(lookup?.Parameters?.Queries).toEqual(['Greeting', 'Goodbye', 'Question'].map((prompt) => ({
     QueryName: prompt,
     Attributes: ['Text'],
@@ -210,7 +225,14 @@ test('ConnectStack looks up the English prompts and associates the sandbox numbe
     .toBe(true);
   const recordIds = Object.keys(template.findResources('AWS::Connect::DataTableRecord'));
   const dependsOn = [flow.DependsOn].flat();
-  expect(dependsOn).toEqual(expect.arrayContaining([...recordIds, 'LexBotIntegration', 'OrchestratorLambdaIntegration']));
+  expect(dependsOn).toEqual(expect.arrayContaining([
+    ...recordIds,
+    'LexBotIntegration',
+    'OrchestratorLambdaIntegration',
+    'OnCallKeyAttribute',
+    'OnCallPhoneAttribute',
+  ]));
+  expect(JSON.stringify(template.toJSON())).not.toMatch(/\+\d{10,15}/);
 
   const customResources = template.findResources('Custom::AWS');
   expect(JSON.stringify(customResources)).toContain('AssociatePhoneNumberContactFlow');
@@ -296,6 +318,55 @@ function numericJsonSchemaKeywords(value: unknown, found: string[] = []): string
     numericJsonSchemaKeywords(child, found);
   }
   return found;
+}
+
+function escalationReasonEnums(template: Template): string[][] {
+  const agents = Object.values(template.findResources('AWS::Wisdom::AIAgent')) as Array<{
+    Properties: {
+      Configuration?: {
+        OrchestrationAIAgentConfiguration?: {
+          ToolConfigurations?: Array<{
+            ToolName?: string;
+            InputSchema?: {
+              properties?: { escalationReason?: { enum?: string[] } };
+            };
+          }>;
+        };
+      };
+    };
+  }>;
+  return agents.map((agent) => {
+    const tools = agent.Properties.Configuration?.OrchestrationAIAgentConfiguration?.ToolConfigurations ?? [];
+    const escalate = tools.find((tool) => tool.ToolName === 'Escalate');
+    const values = escalate?.InputSchema?.properties?.escalationReason?.enum;
+    if (!values) {
+      throw new Error('missing Escalate escalationReason enum');
+    }
+    return values;
+  });
+}
+
+function caseReasonOptionValues(template: Template): string[] {
+  const resources = Object.values(template.findResources('Custom::AWS')) as Array<{
+    Properties: { Create?: unknown };
+  }>;
+  const resource = resources.find((candidate) => JSON.stringify(candidate).includes('HarborRidge311-CaseReason'));
+  const create = resource?.Properties.Create;
+  if (!create || typeof create !== 'object') {
+    throw new Error('missing case reason options');
+  }
+  const joined = (create as { 'Fn::Join'?: [string, unknown[]] })['Fn::Join'];
+  if (!joined) {
+    throw new Error('missing case reason create call');
+  }
+  const [separator, parts] = joined;
+  const text = parts.map((part) => (typeof part === 'string' ? part : 'domain')).join(separator);
+  const call = JSON.parse(text) as { parameters?: { options?: Array<{ value: string }> } };
+  const options = call.parameters?.options;
+  if (!options) {
+    throw new Error('missing case reason option list');
+  }
+  return options.map((option) => option.value);
 }
 
 test('ConnectStack answers city questions from Q in Connect and falls back to goodbye', () => {
@@ -401,6 +472,12 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
   expect(agent).toContain('customer_frustration');
   expect(agent).toContain('policy_exception');
   expect(agent).toContain('out_of_scope');
+  expect(agent).toContain('report_an_outage');
+  expect(agent).toContain('When the caller reports an outage, including no water, no power, or streetlights or traffic signals that are out, set escalationReason to report_an_outage.');
+  const reasonEnums = escalationReasonEnums(template);
+  expect(reasonEnums).toHaveLength(2);
+  expect(reasonEnums[0]).toEqual(reasonEnums[1]);
+  expect(reasonEnums[0]).toEqual(caseReasonOptionValues(template));
   const prompts = JSON.stringify(template.findResources('AWS::Wisdom::AIPrompt'));
   for (const variable of [
     '<message>',
@@ -546,6 +623,18 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
 
   const bot = JSON.stringify(template.findResources('AWS::Lex::Bot'));
   expect(bot).toContain('AMAZON.QInConnectIntent');
+  expect(bot).toContain('"Name":"ReportOutage"');
+  expect(bot).toContain('"Utterance":"1"');
+  expect(bot).toContain('"Utterance":"one"');
+  const botVersionIds = Object.keys(template.findResources('AWS::Lex::BotVersion'));
+  expect(botVersionIds).toHaveLength(1);
+  expect(botVersionIds[0]).toMatch(/^CityQuestionsBotVersion[0-9a-f]{8}$/);
+  const botAliases = template.findResources('AWS::Lex::BotAlias') as Record<string, {
+    Properties: { BotVersion: unknown };
+  }>;
+  expect(botAliases.CityQuestionsBotAlias.Properties.BotVersion).toEqual({
+    'Fn::GetAtt': [botVersionIds[0], 'BotVersion'],
+  });
   expect(bot).not.toContain('AMAZON.QinConnectIntent');
   expect(bot).toContain('AMAZON.FallbackIntent');
   expect(bot).toContain('en_US');
@@ -592,11 +681,16 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
   expect(lexBots.map((action) => action.Parameters?.Text)).toEqual(['$.DataTables.Question.Text']);
   expect(lexBots.every((action) => action.Parameters?.LexV2Bot?.AliasArn === 'token')).toBe(true);
   expect(JSON.stringify(lexBots)).toContain('"x-amz-lex:q-in-connect:session-arn":"$.Wisdom.SessionArn"');
+  expect(JSON.stringify(lexBots)).toContain('"x-amz-lex:dtmf:max-length:*:*":"1"');
+  expect(JSON.stringify(lexBots)).toContain('"x-amz-lex:dtmf:end-timeout-ms:*:*":"300"');
   expect(lexBots).toHaveLength(1);
   for (const action of lexBots) {
     const branch = (errorType: string) =>
       action.Transitions?.Errors?.find((error) => error.ErrorType === errorType)?.NextAction;
-    expect(action.Transitions?.Conditions).toEqual([]);
+    expect(action.Transitions?.Conditions).toEqual([{
+      NextAction: 'set-outage-escalation',
+      Condition: { Operator: 'Equals', Operands: ['ReportOutage'] },
+    }]);
     expect(branch('NoMatchingCondition')).toBe('check-tool');
     expect(branch('InputTimeLimitExceeded')).toBe('check-hours');
     expect(branch('NoMatchingError')).toBe('check-hours');
@@ -717,14 +811,39 @@ test('ConnectStack opens an after-hours case and removes voicemail', () => {
   expect(hoursCheck?.Transitions?.Conditions?.find((branch) => branch.Condition.Operands[0] === 'True')?.NextAction)
     .toBe('set-event-flow');
   expect(hoursCheck?.Transitions?.Conditions?.find((branch) => branch.Condition.Operands[0] === 'False')?.NextAction)
-    .toBe('check-case-title');
+    .toBe('check-outage-reason');
   expect(hoursCheck?.Transitions?.Errors?.[0]).toEqual({
     ErrorType: 'NoMatchingError',
-    NextAction: 'check-case-title',
+    NextAction: 'check-outage-reason',
   });
   expect(main.Actions.some((action) => action.Identifier === 'play-agent-placeholder')).toBe(false);
   expect(main.Actions.some((action) => action.Identifier === 'transfer-after-hours')).toBe(false);
   expect(main.Actions.some((action) => action.Type === 'TransferToFlow')).toBe(false);
+  expect(block('transfer-to-on-call').Type).toBe('TransferParticipantToThirdParty');
+  expect(block('transfer-to-on-call').Parameters).toEqual({
+    ThirdPartyPhoneNumber: '$.DataTables.OnCall.Phone',
+    ThirdPartyConnectionTimeLimitSeconds: '30',
+    ContinueFlowExecution: 'True',
+    CallerId: { Number: 'token' },
+  });
+  expect(block('transfer-to-on-call').Transitions?.NextAction).toBe('disconnect');
+  expect(block('transfer-to-on-call').Transitions?.Errors).toEqual([
+    { ErrorType: 'CallFailed', NextAction: 'check-case-title' },
+    { ErrorType: 'ConnectionTimeLimitExceeded', NextAction: 'check-case-title' },
+    { ErrorType: 'NoMatchingError', NextAction: 'check-case-title' },
+  ]);
+  expect(block('lookup-on-call').Parameters?.Queries).toEqual([{
+    QueryName: 'OnCall',
+    Attributes: ['Phone'],
+    PrimaryValues: [{ AttributeName: 'Key', Value: 'outage' }],
+  }]);
+  const onCallAttributeNames = Object.values(template.findResources('AWS::Connect::DataTableAttribute') as Record<string, {
+    Properties: { Name: string; DataTableArn: unknown };
+  }>).filter((attribute) => JSON.stringify(attribute.Properties.DataTableArn).includes('OnCall'))
+    .map((attribute) => attribute.Properties.Name);
+  const onCallQuery = block('lookup-on-call').Parameters?.Queries?.[0];
+  expect(onCallQuery?.Attributes?.every((name) => onCallAttributeNames.includes(name))).toBe(true);
+  expect(onCallQuery?.PrimaryValues.every((value) => onCallAttributeNames.includes(value.AttributeName))).toBe(true);
   expect(main.Actions.find((action) => action.Identifier === 'set-en-voice')?.Transitions?.NextAction)
     .toBe('lookup-prompts');
   expect(main.Actions.some((action) => action.Identifier === 'select-language')).toBe(false);
@@ -858,6 +977,7 @@ test('ConnectStack opens an after-hours case and removes voicemail', () => {
   const mainRaw = JSON.stringify(contactFlow(template, 'HarborRidge311-Main').Properties.Content);
   expect(mainRaw).toContain('ServiceRequestTemplate');
   expect(mainRaw).toContain('TemplateId');
+  expect(mainRaw).toContain('{"Fn::GetAtt":["OnCall","Arn"]}');
 
   template.resourceCountIs('AWS::DynamoDB::Table', 0);
   template.resourceCountIs('AWS::Events::Rule', 0);
@@ -865,6 +985,11 @@ test('ConnectStack opens an after-hours case and removes voicemail', () => {
   template.resourceCountIs('AWS::Lambda::EventInvokeConfig', 0);
   const parameters = template.toJSON().Parameters as Record<string, { Default?: string }>;
   const parameterDefaults = Object.values(parameters).map((parameter) => parameter.Default);
+  const phoneParameter = Object.entries(parameters).find(([, parameter]) => (
+    parameter.Default === '/connect/sandbox/phone-number'
+  ))?.[0];
+  expect(phoneParameter).toBeDefined();
+  expect(mainRaw).toContain(`"Ref":"${phoneParameter}"`);
   expect(parameterDefaults).toContain('/connect/sandbox/instance-arn');
   expect(parameterDefaults).not.toContain('/connect/sandbox/storage-bucket');
   const templateText = JSON.stringify(template.toJSON());
@@ -973,6 +1098,7 @@ test('ConnectStack adds an active Harbor Ridge 311 case template', () => {
     'customer_frustration',
     'policy_exception',
     'out_of_scope',
+    'report_an_outage',
     'other',
   ]) {
     expect(options).toContain(reason);

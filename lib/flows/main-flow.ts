@@ -8,7 +8,7 @@ interface FlowError {
 interface FlowCondition {
   NextAction: string;
   Condition: {
-    Operator: 'Equals' | 'Exists';
+    Operator: 'Equals' | 'Exists' | 'TextStartsWith';
     Operands: string[];
   };
 }
@@ -36,6 +36,8 @@ interface ContactFlowContent {
 
 export interface MainFlowProps {
   dataTableId: string;
+  onCallTableId: string;
+  callerIdNumber: string;
   wisdomAssistantArn: string;
   lexBotAliasArn: string;
   orchestratorLambdaArn: string;
@@ -46,6 +48,24 @@ export interface MainFlowProps {
   caseTemplateId: string;
   requestCategoryFieldId: string;
 }
+
+export const OUTAGE_ESCALATION_REASON = 'report_an_outage';
+export const REPORT_OUTAGE_INTENT = 'ReportOutage';
+
+export const ON_CALL = {
+  tableName: 'HarborRidge311-OnCall',
+  keyAttribute: 'Key',
+  keyValue: 'outage',
+  phoneAttribute: 'Phone',
+  queryName: 'OnCall',
+} as const;
+
+const OUTAGE_CUSTOMER_INTENT = 'Report an outage';
+const OUTAGE_SUMMARY = 'The customer chose 1 to report an outage.';
+const ON_CALL_CONNECTING_TEXT = 'Connecting you to on-call staff now.';
+const OUTAGE_CHAT_TEXT = 'For outages, use the Call button on this page to reach on-call staff.';
+const ON_CALL_RING_SECONDS = '30';
+const ON_CALL_PHONE = `$.DataTables.${ON_CALL.queryName}.${ON_CALL.phoneAttribute}`;
 
 const VOICE_GREETING = 'Thank you for calling Harbor Ridge 3 1 1. This line is a demo.';
 const VOICE_GOODBYE = 'Thank you for calling Harbor Ridge 3 1 1. Goodbye.';
@@ -128,6 +148,15 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
         'play-case-voice': { position: { x: 5480, y: 1200 } },
         'play-closed': { position: { x: 3240, y: 1200 } },
         disconnect: { position: { x: 3240, y: 360 } },
+        'set-outage-escalation': { position: { x: 2400, y: 920 } },
+        'check-outage-reason': { position: { x: 2960, y: 920 } },
+        'branch-outage-channel': { position: { x: 2960, y: 1200 } },
+        'lookup-on-call': { position: { x: 2960, y: 1480 } },
+        'check-on-call-phone': { position: { x: 3240, y: 1480 } },
+        'play-on-call': { position: { x: 3520, y: 1480 } },
+        'transfer-to-on-call': { position: { x: 3800, y: 1480 } },
+        'check-chat-outage': { position: { x: 5480, y: 640 } },
+        'play-case-chat-outage': { position: { x: 5760, y: 640 } },
       },
     },
     Actions: [
@@ -221,6 +250,8 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
           },
           LexSessionAttributes: {
             'x-amz-lex:q-in-connect:session-arn': '$.Wisdom.SessionArn',
+            'x-amz-lex:dtmf:max-length:*:*': '1',
+            'x-amz-lex:dtmf:end-timeout-ms:*:*': '300',
           },
         },
         Transitions: {
@@ -230,7 +261,12 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
             { ErrorType: 'NoMatchingCondition', NextAction: 'check-tool' },
             { ErrorType: 'NoMatchingError', NextAction: 'check-hours' },
           ],
-          Conditions: [],
+          Conditions: [
+            {
+              NextAction: 'set-outage-escalation',
+              Condition: { Operator: 'Equals', Operands: [REPORT_OUTAGE_INTENT] },
+            },
+          ],
         },
       },
       {
@@ -288,11 +324,11 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
               Condition: { Operator: 'Equals', Operands: ['True'] },
             },
             {
-              NextAction: 'check-case-title',
+              NextAction: 'check-outage-reason',
               Condition: { Operator: 'Equals', Operands: ['False'] },
             },
           ],
-          Errors: errorTo('check-case-title'),
+          Errors: errorTo('check-outage-reason'),
         },
       },
       {
@@ -591,7 +627,7 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
           NextAction: 'play-case-voice',
           Conditions: [
             {
-              NextAction: 'play-case-chat',
+              NextAction: 'check-chat-outage',
               Condition: { Operator: 'Equals', Operands: ['CHAT'] },
             },
           ],
@@ -665,6 +701,162 @@ export function mainFlow(props: MainFlowProps): ContactFlowContent {
         Type: 'DisconnectParticipant',
         Parameters: {},
         Transitions: {},
+      },
+      {
+        Identifier: 'set-outage-escalation',
+        Type: 'UpdateContactAttributes',
+        Parameters: {
+          Attributes: {
+            escalationReason: OUTAGE_ESCALATION_REASON,
+            escalationSummary: OUTAGE_SUMMARY,
+            customerIntent: OUTAGE_CUSTOMER_INTENT,
+            sentiment: 'neutral',
+          },
+          TargetContact: 'Current',
+        },
+        Transitions: {
+          NextAction: 'check-hours',
+          Errors: errorTo('check-hours'),
+          Conditions: [],
+        },
+      },
+      {
+        Identifier: 'check-outage-reason',
+        Type: 'Compare',
+        Parameters: {
+          ComparisonValue: '$.Attributes.escalationReason',
+        },
+        Transitions: {
+          NextAction: 'check-case-title',
+          Conditions: [
+            {
+              NextAction: 'branch-outage-channel',
+              Condition: { Operator: 'Equals', Operands: [OUTAGE_ESCALATION_REASON] },
+            },
+          ],
+          Errors: [
+            { ErrorType: 'NoMatchingCondition', NextAction: 'check-case-title' },
+          ],
+        },
+      },
+      {
+        Identifier: 'branch-outage-channel',
+        Type: 'Compare',
+        Parameters: {
+          ComparisonValue: '$.Channel',
+        },
+        Transitions: {
+          NextAction: 'check-case-title',
+          Conditions: [
+            {
+              NextAction: 'lookup-on-call',
+              Condition: { Operator: 'Equals', Operands: ['VOICE'] },
+            },
+          ],
+          Errors: [
+            { ErrorType: 'NoMatchingCondition', NextAction: 'check-case-title' },
+          ],
+        },
+      },
+      {
+        Identifier: 'lookup-on-call',
+        Type: 'EvaluateDataTableValues',
+        Parameters: {
+          DataTableId: props.onCallTableId,
+          Queries: [
+            {
+              QueryName: ON_CALL.queryName,
+              Attributes: [ON_CALL.phoneAttribute],
+              PrimaryValues: [{ AttributeName: ON_CALL.keyAttribute, Value: ON_CALL.keyValue }],
+            },
+          ],
+        },
+        Transitions: {
+          NextAction: 'check-on-call-phone',
+          Errors: errorTo('check-case-title'),
+          Conditions: [],
+        },
+      },
+      {
+        Identifier: 'check-on-call-phone',
+        Type: 'Compare',
+        Parameters: {
+          ComparisonValue: ON_CALL_PHONE,
+        },
+        Transitions: {
+          NextAction: 'check-case-title',
+          Conditions: [
+            {
+              NextAction: 'play-on-call',
+              Condition: { Operator: 'TextStartsWith', Operands: ['+'] },
+            },
+          ],
+          Errors: [
+            { ErrorType: 'NoMatchingCondition', NextAction: 'check-case-title' },
+          ],
+        },
+      },
+      {
+        Identifier: 'play-on-call',
+        Type: 'MessageParticipant',
+        Parameters: {
+          Text: ON_CALL_CONNECTING_TEXT,
+        },
+        Transitions: {
+          NextAction: 'transfer-to-on-call',
+          Errors: errorTo('transfer-to-on-call'),
+          Conditions: [],
+        },
+      },
+      {
+        Identifier: 'transfer-to-on-call',
+        Type: 'TransferParticipantToThirdParty',
+        Parameters: {
+          ThirdPartyPhoneNumber: ON_CALL_PHONE,
+          ThirdPartyConnectionTimeLimitSeconds: ON_CALL_RING_SECONDS,
+          ContinueFlowExecution: 'True',
+          CallerId: { Number: props.callerIdNumber },
+        },
+        Transitions: {
+          NextAction: 'disconnect',
+          Errors: [
+            { ErrorType: 'CallFailed', NextAction: 'check-case-title' },
+            { ErrorType: 'ConnectionTimeLimitExceeded', NextAction: 'check-case-title' },
+            { ErrorType: 'NoMatchingError', NextAction: 'check-case-title' },
+          ],
+          Conditions: [],
+        },
+      },
+      {
+        Identifier: 'check-chat-outage',
+        Type: 'Compare',
+        Parameters: {
+          ComparisonValue: '$.Attributes.escalationReason',
+        },
+        Transitions: {
+          NextAction: 'play-case-chat',
+          Conditions: [
+            {
+              NextAction: 'play-case-chat-outage',
+              Condition: { Operator: 'Equals', Operands: [OUTAGE_ESCALATION_REASON] },
+            },
+          ],
+          Errors: [
+            { ErrorType: 'NoMatchingCondition', NextAction: 'play-case-chat' },
+          ],
+        },
+      },
+      {
+        Identifier: 'play-case-chat-outage',
+        Type: 'MessageParticipant',
+        Parameters: {
+          Text: `${AFTER_HOURS_CASE_PLAY_TEXT} ${OUTAGE_CHAT_TEXT}`,
+        },
+        Transitions: {
+          NextAction: 'disconnect',
+          Errors: errorTo('play-closed'),
+          Conditions: [],
+        },
       },
     ],
   };

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import * as path from 'node:path';
 import * as appintegrations from 'aws-cdk-lib/aws-appintegrations';
 import * as cases from 'aws-cdk-lib/aws-cases';
@@ -22,6 +23,9 @@ import {
   AFTER_HOURS_CASE_TEXT_AFTER,
   AFTER_HOURS_CASE_VOICE_TEXT,
   mainFlow,
+  ON_CALL,
+  OUTAGE_ESCALATION_REASON,
+  REPORT_OUTAGE_INTENT,
 } from './flows/main-flow';
 import { customerQueueFlow, QUEUE_CHAT_TEXT, QUEUE_VOICE_TEXT } from './flows/queue-flow';
 import { ORCHESTRATION_MODEL_ID, orchestrationPrompt } from './orchestration-prompt';
@@ -33,14 +37,17 @@ export const MAIN_CONTACT_FLOW_ARN_PARAMETER = `${SANDBOX_PARAMETER_PREFIX}/harb
 export const CUSTOMER_QUEUE_PROMPT_ID = '666650f7-db8f-435f-bc27-77644f59f6bb';
 export const REQUEST_CATEGORY_FIELD_ID = '137be1e8-7eac-4741-9a3b-18aedbdcf77b';
 
-const ESCALATION_REASON_OPTIONS = [
+const ESCALATION_REASONS = [
   'complex_request',
   'technical_issue',
   'customer_frustration',
   'policy_exception',
   'out_of_scope',
+  OUTAGE_ESCALATION_REASON,
   'other',
-].map((value) => ({ name: value, value }));
+] as const;
+
+const ESCALATION_REASON_OPTIONS = ESCALATION_REASONS.map((value) => ({ name: value, value }));
 
 const WEEKDAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'] as const;
 
@@ -181,14 +188,7 @@ function orchestrationTools(): wisdom.CfnAIAgent.ToolConfigurationProperty[] {
           escalationReason: {
             type: 'string',
             description: 'Category for the escalation reason',
-            enum: [
-              'complex_request',
-              'technical_issue',
-              'customer_frustration',
-              'policy_exception',
-              'out_of_scope',
-              'other',
-            ],
+            enum: [...ESCALATION_REASONS],
           },
         },
         required: [
@@ -199,7 +199,7 @@ function orchestrationTools(): wisdom.CfnAIAgent.ToolConfigurationProperty[] {
         ],
       },
       instruction: {
-        instruction: 'Escalate to a person when the caller asks for a person, agent, representative, or transfer. Also escalate for a policy exception, an inspection, or another request a city employee has to handle, when the question is outside Harbor Ridge city services, when the FAQ does not contain an answer, when the caller is frustrated, or when the request needs payment, an account change, or personal information.',
+        instruction: `Escalate to a person when the caller asks for a person, agent, representative, or transfer. Also escalate for a policy exception, an inspection, or another request a city employee has to handle, when the question is outside Harbor Ridge city services, when the FAQ does not contain an answer, when the caller is frustrated, or when the request needs payment, an account change, or personal information. When the caller reports an outage, including no water, no power, or streetlights or traffic signals that are out, set escalationReason to ${OUTAGE_ESCALATION_REASON}.`,
         examples: [
           'I can connect you with a person. I will share what we talked about so you do not have to start over.',
         ],
@@ -234,6 +234,11 @@ function cityQuestionLocale(localeId: string, voiceId: string, assistantArn: str
       {
         name: 'FallbackIntent',
         parentIntentSignature: 'AMAZON.FallbackIntent',
+      },
+      {
+        name: REPORT_OUTAGE_INTENT,
+        description: 'Caller pressed or said 1 to report an outage.',
+        sampleUtterances: [{ utterance: '1' }, { utterance: 'one' }],
       },
       {
         name: 'CityQuestion',
@@ -315,7 +320,7 @@ export class ConnectStack extends cdk.Stack {
       valueType: 'TEXT',
     });
     const promptRows = [
-      ['Greeting', 'VOICE', 'Thank you for calling Harbor Ridge 3 1 1. This line is a demo.'],
+      ['Greeting', 'VOICE', "If you're reporting an outage, press 1 at any time. Thank you for calling Harbor Ridge 3 1 1. This line is a demo."],
       ['Greeting', 'CHAT', 'Welcome to Harbor Ridge 311 chat. This is a demo.'],
       ['Goodbye', 'VOICE', 'Thank you for calling Harbor Ridge 3 1 1. Goodbye.'],
       ['Goodbye', 'CHAT', 'Thanks for chatting with Harbor Ridge 311. Goodbye.'],
@@ -641,6 +646,7 @@ export class ConnectStack extends cdk.Stack {
       ],
     }));
 
+    const cityQuestions = cityQuestionLocale('en_US', 'Joanna', assistantArn);
     const bot = new lex.CfnBot(this, 'CityQuestionsBot', {
       name: 'HarborRidge311-CityQuestions',
       description: 'Harbor Ridge 311 city questions',
@@ -651,11 +657,13 @@ export class ConnectStack extends cdk.Stack {
       testBotAliasSettings: {
         botAliasLocaleSettings: [enabledLocale('en_US')],
       },
-      botLocales: [
-        cityQuestionLocale('en_US', 'Joanna', assistantArn),
-      ],
+      botLocales: [cityQuestions],
     });
-    const botVersion = new lex.CfnBotVersion(this, 'CityQuestionsBotVersion', {
+    const botLocaleHash = createHash('sha256')
+      .update(JSON.stringify(this.resolve(cityQuestions)))
+      .digest('hex')
+      .slice(0, 8);
+    const botVersion = new lex.CfnBotVersion(this, `CityQuestionsBotVersion${botLocaleHash}`, {
       botId: bot.attrId,
       botVersionLocaleSpecification: [
         { localeId: 'en_US', botVersionLocaleDetails: { sourceBotVersion: 'DRAFT' } },
@@ -811,7 +819,29 @@ export class ConnectStack extends cdk.Stack {
       securityProfileArns: [agentSecurityProfile.attrSecurityProfileArn],
     });
 
+    const onCall = new connect.CfnDataTable(this, 'OnCall', {
+      instanceArn,
+      name: ON_CALL.tableName,
+      description: `After-hours outage on-call number. Add one row: Key ${ON_CALL.keyValue}, Phone in E.164 format starting with +.`,
+      status: 'PUBLISHED',
+      timeZone: 'America/New_York',
+      valueLockLevel: 'NONE',
+    });
+    const onCallKeyAttribute = new connect.CfnDataTableAttribute(this, 'OnCallKeyAttribute', {
+      instanceArn,
+      dataTableArn: onCall.attrArn,
+      name: ON_CALL.keyAttribute,
+      primary: true,
+      valueType: 'TEXT',
+    });
+    const onCallPhoneAttribute = new connect.CfnDataTableAttribute(this, 'OnCallPhoneAttribute', {
+      instanceArn,
+      dataTableArn: onCall.attrArn,
+      name: ON_CALL.phoneAttribute,
+      valueType: 'TEXT',
+    });
     const dataTableId = cdk.Fn.select(3, cdk.Fn.split('/', prompts.attrArn));
+    const onCallTableId = cdk.Fn.select(3, cdk.Fn.split('/', onCall.attrArn));
     const requestCategory = new cases.CfnField(this, 'RequestCategory', {
       domainId: casesDomainId,
       name: 'Request category',
@@ -927,6 +957,8 @@ export class ConnectStack extends cdk.Stack {
       type: 'CONTACT_FLOW',
       content: cdk.Fn.toJsonString(mainFlow({
         dataTableId,
+        onCallTableId,
+        callerIdNumber: phoneNumber,
         wisdomAssistantArn: assistantArn,
         lexBotAliasArn: botAlias.attrArn,
         orchestratorLambdaArn: selectOrchestrator.functionArn,
@@ -938,7 +970,14 @@ export class ConnectStack extends cdk.Stack {
         requestCategoryFieldId: REQUEST_CATEGORY_FIELD_ID,
       })),
     });
-    flow.node.addDependency(...promptRows, lexAssociation, orchestratorAssociation, caseReasonOptions);
+    flow.node.addDependency(
+      ...promptRows,
+      onCallKeyAttribute,
+      onCallPhoneAttribute,
+      lexAssociation,
+      orchestratorAssociation,
+      caseReasonOptions,
+    );
     setDefaultAgent.node.addDependency(botAlias, flow);
     const mainContactFlowId = cdk.Fn.select(3, cdk.Fn.split('/', flow.attrContactFlowArn));
     new ssm.StringParameter(this, 'MainContactFlowIdParameter', {

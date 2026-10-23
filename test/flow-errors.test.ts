@@ -22,10 +22,13 @@ const allowedErrors: Record<string, readonly string[]> = {
   MessageParticipantIteratively: ['NoMatchingError'],
   CreateCase: ['ContactNotLinked', 'NoMatchingError'],
   GetCase: ['NoMatchingError', 'NoneFound', 'MultipleFound', 'ContactNotLinked'],
+  TransferParticipantToThirdParty: ['CallFailed', 'ConnectionTimeLimitExceeded', 'NoMatchingError'],
 };
 
 const flowProps = {
   dataTableId: 'table',
+  onCallTableId: 'on-call-table',
+  callerIdNumber: 'caller-id',
   wisdomAssistantArn: 'assistant',
   lexBotAliasArn: 'alias',
   orchestratorLambdaArn: 'orchestrator',
@@ -211,6 +214,14 @@ test('main flow looks up prompt text by channel and plays the greeting on succes
     { ErrorType: 'NoMatchingCondition', NextAction: 'check-tool' },
     { ErrorType: 'NoMatchingError', NextAction: 'check-hours' },
   ]);
+  expect(block('ask-en-question').Transitions.Conditions).toEqual([
+    { NextAction: 'set-outage-escalation', Condition: { Operator: 'Equals', Operands: ['ReportOutage'] } },
+  ]);
+  expect(block('ask-en-question').Parameters.LexSessionAttributes).toEqual({
+    'x-amz-lex:q-in-connect:session-arn': '$.Wisdom.SessionArn',
+    'x-amz-lex:dtmf:max-length:*:*': '1',
+    'x-amz-lex:dtmf:end-timeout-ms:*:*': '300',
+  });
   expect(block('check-tool').Transitions).toMatchObject({
     NextAction: 'play-goodbye',
     Conditions: [
@@ -243,7 +254,10 @@ test('in-hours escalation sets the agent guide before transferring to the queue'
   expect(block('check-hours').Parameters.HoursOfOperationId).toBe('hours');
   expect(block('check-hours').Transitions.NextAction).toBe('set-event-flow');
   expect(next('check-hours', 'True')).toBe('set-event-flow');
-  expect(next('check-hours', 'False')).toBe('check-case-title');
+  expect(next('check-hours', 'False')).toBe('check-outage-reason');
+  expect(block('check-hours').Transitions.Errors).toEqual([
+    { ErrorType: 'NoMatchingError', NextAction: 'check-outage-reason' },
+  ]);
   expect(block('set-escalation').Transitions.NextAction).toBe('check-hours');
   expect(next('check-tool', 'Escalate')).toBe('set-escalation');
   expect(block('set-event-flow')).toMatchObject({
@@ -285,6 +299,11 @@ test('in-hours escalation sets the agent guide before transferring to the queue'
   });
   expect(flow.Actions.filter((action) => action.Type === 'CreateWisdomSession')).toHaveLength(1);
   expect(block('create-assistant-session').Transitions.NextAction).toBe('select-orchestrator');
+  const inHours = reachable(flow, 'set-event-flow');
+  expect(inHours.has('transfer-to-queue')).toBe(true);
+  expect(inHours.has('check-outage-reason')).toBe(false);
+  expect(inHours.has('lookup-on-call')).toBe(false);
+  expect(inHours.has('transfer-to-on-call')).toBe(false);
 
   const guide = escalationGuideFlow({ detailViewArn });
   const show = guide.Actions.find((action) => action.Identifier === 'show-escalation');
@@ -427,7 +446,7 @@ test('after-hours escalation creates a case, speaks the reference, and disconnec
   });
   expect(block('check-reference').Transitions.NextAction).toBe('play-closed');
   expect(block('branch-case-channel').Transitions.Conditions?.[0]).toMatchObject({
-    NextAction: 'play-case-chat',
+    NextAction: 'check-chat-outage',
     Condition: { Operator: 'Equals', Operands: ['CHAT'] },
   });
   expect(block('branch-case-channel').Transitions.NextAction).toBe('play-case-voice');
@@ -462,6 +481,153 @@ test('after-hours escalation creates a case, speaks the reference, and disconnec
       expect(b.x % 280).toBe(160 % 280);
     }
   }
+});
+
+test('pressing 1 escalates with the outage reason without the AI', () => {
+  const flow = mainFlow(flowProps);
+  const block = (identifier: string) => {
+    const found = flow.Actions.find((action) => action.Identifier === identifier);
+    if (!found) {
+      throw new Error(`missing ${identifier}`);
+    }
+    return found;
+  };
+  const pressed = reachable(flow, 'set-outage-escalation');
+
+  expect(block('set-outage-escalation').Parameters).toEqual({
+    Attributes: {
+      escalationReason: 'report_an_outage',
+      escalationSummary: 'The customer chose 1 to report an outage.',
+      customerIntent: 'Report an outage',
+      sentiment: 'neutral',
+    },
+    TargetContact: 'Current',
+  });
+  expect(block('set-outage-escalation').Transitions.NextAction).toBe('check-hours');
+  expect(block('set-outage-escalation').Transitions.Errors).toEqual([
+    { ErrorType: 'NoMatchingError', NextAction: 'check-hours' },
+  ]);
+  expect(pressed.has('check-tool')).toBe(false);
+  expect(pressed.has('set-escalation')).toBe(false);
+});
+
+test('after-hours voice outage tries on-call before any case', () => {
+  const flow = mainFlow(flowProps);
+  const block = (identifier: string) => {
+    const found = flow.Actions.find((action) => action.Identifier === identifier);
+    if (!found) {
+      throw new Error(`missing ${identifier}`);
+    }
+    return found;
+  };
+  const onCallBlocks = [
+    'branch-outage-channel',
+    'lookup-on-call',
+    'check-on-call-phone',
+    'play-on-call',
+    'transfer-to-on-call',
+  ];
+  const onCallTargets = new Set([...onCallBlocks, 'check-case-title', 'disconnect']);
+
+  expect(block('check-outage-reason').Parameters.ComparisonValue).toBe('$.Attributes.escalationReason');
+  expect(block('check-outage-reason').Transitions.Conditions).toEqual([{
+    NextAction: 'branch-outage-channel',
+    Condition: { Operator: 'Equals', Operands: ['report_an_outage'] },
+  }]);
+  expect(block('check-outage-reason').Transitions.NextAction).toBe('check-case-title');
+  expect(block('check-outage-reason').Transitions.Errors).toEqual([
+    { ErrorType: 'NoMatchingCondition', NextAction: 'check-case-title' },
+  ]);
+  expect(block('branch-outage-channel').Transitions.Conditions).toEqual([{
+    NextAction: 'lookup-on-call',
+    Condition: { Operator: 'Equals', Operands: ['VOICE'] },
+  }]);
+  expect(block('branch-outage-channel').Transitions.NextAction).toBe('check-case-title');
+  expect(block('branch-outage-channel').Transitions.Errors).toEqual([
+    { ErrorType: 'NoMatchingCondition', NextAction: 'check-case-title' },
+  ]);
+  expect(block('lookup-on-call').Parameters).toEqual({
+    DataTableId: 'on-call-table',
+    Queries: [{
+      QueryName: 'OnCall',
+      Attributes: ['Phone'],
+      PrimaryValues: [{ AttributeName: 'Key', Value: 'outage' }],
+    }],
+  });
+  expect(block('lookup-on-call').Transitions.Errors).toEqual([
+    { ErrorType: 'NoMatchingError', NextAction: 'check-case-title' },
+  ]);
+  expect(block('check-on-call-phone').Parameters.ComparisonValue).toBe('$.DataTables.OnCall.Phone');
+  expect(block('check-on-call-phone').Transitions.Conditions).toEqual([{
+    NextAction: 'play-on-call',
+    Condition: { Operator: 'TextStartsWith', Operands: ['+'] },
+  }]);
+  expect(block('check-on-call-phone').Transitions.NextAction).toBe('check-case-title');
+  expect(block('play-on-call').Parameters).toEqual({ Text: 'Connecting you to on-call staff now.' });
+  expect(block('play-on-call').Transitions.NextAction).toBe('transfer-to-on-call');
+  expect(block('play-on-call').Transitions.Errors).toEqual([
+    { ErrorType: 'NoMatchingError', NextAction: 'transfer-to-on-call' },
+  ]);
+  expect(block('transfer-to-on-call').Parameters).toEqual({
+    ThirdPartyPhoneNumber: '$.DataTables.OnCall.Phone',
+    ThirdPartyConnectionTimeLimitSeconds: '30',
+    ContinueFlowExecution: 'True',
+    CallerId: { Number: 'caller-id' },
+  });
+  expect(block('transfer-to-on-call').Transitions.NextAction).toBe('disconnect');
+  expect(block('transfer-to-on-call').Transitions.Errors).toEqual([
+    { ErrorType: 'CallFailed', NextAction: 'check-case-title' },
+    { ErrorType: 'ConnectionTimeLimitExceeded', NextAction: 'check-case-title' },
+    { ErrorType: 'NoMatchingError', NextAction: 'check-case-title' },
+  ]);
+  const casePath = reachable(flow, 'check-case-title');
+  expect(casePath.has('lookup-on-call')).toBe(false);
+  expect(casePath.has('transfer-to-on-call')).toBe(false);
+  for (const identifier of onCallBlocks) {
+    const action = block(identifier);
+    const targets = [
+      action.Transitions.NextAction,
+      ...(action.Transitions.Errors ?? []).map((error) => error.NextAction),
+      ...(action.Transitions.Conditions ?? []).map((branch) => branch.NextAction),
+    ];
+    for (const target of targets) {
+      expect(onCallTargets.has(target ?? '')).toBe(true);
+    }
+  }
+  expect(block('disconnect').Transitions).toEqual({});
+});
+
+test('after-hours chat outage adds the Call button line', () => {
+  const flow = mainFlow(flowProps);
+  const block = (identifier: string) => {
+    const found = flow.Actions.find((action) => action.Identifier === identifier);
+    if (!found) {
+      throw new Error(`missing ${identifier}`);
+    }
+    return found;
+  };
+
+  expect(block('check-chat-outage').Transitions.Conditions).toEqual([{
+    NextAction: 'play-case-chat-outage',
+    Condition: { Operator: 'Equals', Operands: ['report_an_outage'] },
+  }]);
+  expect(block('check-chat-outage').Transitions.NextAction).toBe('play-case-chat');
+  expect(block('check-chat-outage').Transitions.Errors).toEqual([
+    { ErrorType: 'NoMatchingCondition', NextAction: 'play-case-chat' },
+  ]);
+  expect(block('play-case-chat-outage').Parameters).toEqual({
+    Text: '$.DataTables.AfterHoursCase.Text $.Case.reference_number. $.DataTables.AfterHoursCase.TextAfter For outages, use the Call button on this page to reach on-call staff.',
+  });
+  expect(block('play-case-chat-outage').Transitions.NextAction).toBe('disconnect');
+  expect(block('play-case-chat-outage').Transitions.Errors).toEqual([
+    { ErrorType: 'NoMatchingError', NextAction: 'play-closed' },
+  ]);
+  expect(block('play-case-chat').Parameters).toEqual({
+    Text: '$.DataTables.AfterHoursCase.Text $.Case.reference_number. $.DataTables.AfterHoursCase.TextAfter',
+  });
+  expect(block('play-case-voice').Parameters).toEqual({
+    SSML: '<speak>$.DataTables.AfterHoursCase.Text <say-as interpret-as="digits">$.Case.reference_number</say-as>. $.DataTables.AfterHoursCase.TextAfter</speak>',
+  });
 });
 
 test('customer queue flow covers chat and voice', () => {
