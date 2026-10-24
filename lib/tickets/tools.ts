@@ -12,6 +12,10 @@ export const TICKET_OPERATIONS = [
 
 export type TicketOperation = (typeof TICKET_OPERATIONS)[number];
 
-export function ticketToolId(operation: TicketOperation): string {
+export function ticketPermission(operation: TicketOperation): string {
   return `${TICKET_TARGET_NAME}___${operation}`;
+}
+
+export function ticketToolId(gatewayId: string, operation: TicketOperation): string {
+  return `gateway_${gatewayId}__${ticketPermission(operation)}`;
 }

@@ -82,11 +82,12 @@ function reject(id: unknown, message: string): InterceptorOutput {
   };
 }
 
+const TICKET_TOOL_MARKER = 'Tickets___';
+
 function operationName(name: unknown): string | undefined {
   if (typeof name !== 'string' || name.length === 0) return undefined;
-  const marker = '___';
-  const index = name.lastIndexOf(marker);
-  return index === -1 ? name : name.slice(index + marker.length);
+  const index = name.lastIndexOf(TICKET_TOOL_MARKER);
+  return index === -1 ? name : name.slice(index + TICKET_TOOL_MARKER.length);
 }
 
 function attribute(attributes: Record<string, string> | undefined, name: string): string | undefined {
@@ -102,10 +103,14 @@ export async function bindCustomer(event: unknown, lookup: ContactLookup): Promi
       : {}));
   }
   const params = isRecord(body.params) ? body.params : undefined;
+  const toolName = params?.name;
+  if (typeof toolName === 'string') {
+    console.info(`ticket tool ${toolName}`);
+  }
   const args = params && isRecord(params.arguments) ? { ...params.arguments } : undefined;
   const contactId = args?.contactId;
   const instanceId = args?.instanceId;
-  const operation = operationName(params?.name);
+  const operation = operationName(toolName);
   if (!args || typeof contactId !== 'string' || typeof instanceId !== 'string' || !isCustomerId(contactId) || !ID_PATTERN.test(instanceId) || !operation) {
     return reject(body.id, PROFILE_REQUIRED);
   }

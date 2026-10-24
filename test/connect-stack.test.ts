@@ -1012,13 +1012,33 @@ test('ConnectStack stores customer-scoped tickets behind an IAM API and a JWT ga
     Properties: { Name?: string };
     DependsOn?: string | string[];
   }>;
+  const orchestratorProfileId = Object.entries(template.findResources('AWS::Connect::SecurityProfile')).find(([, resource]) => (
+    (resource as { Properties: { SecurityProfileName?: string } }).Properties.SecurityProfileName === 'HarborRidge311-Orchestration'
+  ))?.[0];
+  expect(orchestratorProfileId).toBeDefined();
+  const orchestratorProfile = template.findResources('AWS::Connect::SecurityProfile')[orchestratorProfileId ?? ''] as {
+    DependsOn?: string | string[];
+  };
+  expect(JSON.stringify(orchestratorProfile.DependsOn ?? [])).not.toContain('OrchestrationAgent');
   for (const name of ['HarborRidge311-VoiceOrchestration', 'HarborRidge311-ChatOrchestration']) {
     const agent = orchestrationAgents.find((resource) => resource.Properties.Name === name);
     expect([agent?.DependsOn].flat()).toEqual(expect.arrayContaining([
       ticketTargetId,
       ticketApplicationId,
       ticketAssociationId,
+      orchestratorProfileId,
     ]));
+    const ticketTools = JSON.stringify(agent).match(/__Tickets___[A-Za-z]+/g) ?? [];
+    expect(ticketTools.sort()).toEqual([
+      '__Tickets___closeTicket',
+      '__Tickets___createTicket',
+      '__Tickets___getTicket',
+      '__Tickets___listMyTickets',
+      '__Tickets___updateTicket',
+    ]);
+    expect(JSON.stringify(agent)).toContain('GatewayIdentifier');
+    expect(JSON.stringify(agent)).toContain('gateway_');
+    expect(JSON.stringify(agent)).not.toContain('harborridge311tickets-');
   }
   template.hasResourceProperties('AWS::Connect::SecurityProfile', {
     SecurityProfileName: 'HarborRidge311-Orchestration',

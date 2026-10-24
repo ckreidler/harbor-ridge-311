@@ -21,6 +21,7 @@ import {
   type TicketStatus,
 } from '../lib/tickets/model';
 import { ticketOpenApiDocument } from '../lib/tickets/openapi';
+import { ticketPermission, ticketToolId } from '../lib/tickets/tools';
 import { IDENTITY_SOURCE_ANI, IDENTITY_SOURCE_CHAT } from '../lib/tickets/identity';
 import type { StoredTicket, TicketStore } from '../lib/tickets/store';
 
@@ -371,6 +372,50 @@ test('verifiedContact uses DescribeContact channel and ignores a contact attribu
     identitySource: undefined,
     channel: undefined,
   });
+});
+
+test('Q tool ids use the gateway id and security-profile permissions stay bare', () => {
+  expect(ticketPermission('listMyTickets')).toBe('Tickets___listMyTickets');
+  expect(ticketToolId('harborridge311tickets-dht3u2tcnh', 'listMyTickets'))
+    .toBe('gateway_harborridge311tickets-dht3u2tcnh__Tickets___listMyTickets');
+});
+
+test('the interceptor accepts both tool name forms and logs only the raw name', async () => {
+  const voice = {
+    customerId: customer,
+    identitySource: IDENTITY_SOURCE_ANI,
+    channel: 'VOICE',
+  };
+  const args = {
+    customerId: 'model-chose-this',
+    contactId: contact,
+    instanceId: 'instance-1',
+    ticketId: 'HR-234567',
+  };
+  const qName = 'gateway_harborridge311tickets-dht3u2tcnh__Tickets___listMyTickets';
+  const logged = jest.spyOn(console, 'info').mockImplementation(() => undefined);
+  const prefixed = await bindCustomer(callEvent(qName, args), async () => voice);
+  expect(prefixed.mcp.transformedGatewayRequest?.body).toMatchObject({
+    params: { arguments: { customerId: customer, contactId: contact } },
+  });
+  const bare = await bindCustomer(callEvent('Tickets___getTicket', args), async () => voice);
+  expect(bare.mcp.transformedGatewayRequest?.body).toMatchObject({
+    params: { arguments: { customerId: customer, ticketId: 'HR-234567' } },
+  });
+  const unknown = await bindCustomer(callEvent('gateway_harborridge311tickets-dht3u2tcnh__Tickets___dropTicket', args), async () => voice);
+  expect(unknown.mcp.transformedGatewayResponse?.body).toMatchObject({
+    error: { code: -32602, message: 'A verified customer profile is required.' },
+  });
+  const messages = logged.mock.calls.map((call) => call.map(String).join(' '));
+  expect(messages).toEqual([
+    `ticket tool ${qName}`,
+    'ticket tool Tickets___getTicket',
+    'ticket tool gateway_harborridge311tickets-dht3u2tcnh__Tickets___dropTicket',
+  ]);
+  expect(messages.join('\n')).not.toContain('model-chose-this');
+  expect(messages.join('\n')).not.toContain(contact);
+  expect(messages.join('\n')).not.toContain('HR-234567');
+  logged.mockRestore();
 });
 
 test('the request interceptor overwrites customerId and blocks chat reads', async () => {
