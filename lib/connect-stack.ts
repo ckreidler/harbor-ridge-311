@@ -510,25 +510,19 @@ export class ConnectStack extends cdk.Stack {
     const voiceAgentVersionArn = voiceOrchestrator.agentVersion.attrAiAgentArn;
     const chatAgentArn = chatOrchestrator.agent.attrAiAgentArn;
     const chatAgentVersionArn = chatOrchestrator.agentVersion.attrAiAgentArn;
-    const agentArns = [voiceAgentArn, voiceAgentVersionArn, chatAgentArn, chatAgentVersionArn];
-    const unqualifiedAgentArn = (agentId: string): string => this.formatArn({
-      service: 'wisdom',
-      resource: 'ai-agent',
-      resourceName: cdk.Fn.join('/', [assistantId, agentId]),
-    });
-    const voiceUnqualifiedArn = unqualifiedAgentArn(voiceOrchestrator.agent.attrAiAgentId);
-    const chatUnqualifiedArn = unqualifiedAgentArn(chatOrchestrator.agent.attrAiAgentId);
-    const getAiAgentResources = [
-      ...agentArns,
-      voiceUnqualifiedArn,
-      cdk.Fn.join('', [voiceUnqualifiedArn, ':*']),
-      chatUnqualifiedArn,
-      cdk.Fn.join('', [chatUnqualifiedArn, ':*']),
-    ];
+    const stableAgentResources = [voiceOrchestrator.agent.attrAiAgentId, chatOrchestrator.agent.attrAiAgentId]
+      .flatMap((agentId) => {
+        const arn = this.formatArn({
+          service: 'wisdom',
+          resource: 'ai-agent',
+          resourceName: cdk.Fn.join('/', [assistantId, agentId]),
+        });
+        return [arn, cdk.Fn.join('', [arn, ':*'])];
+      });
     const securityProfileResources = [
       instanceArn,
       orchestratorSecurityProfile.attrSecurityProfileArn,
-      ...agentArns,
+      ...stableAgentResources,
     ];
     const securityProfileAssociations = [
       { id: 'AssociateVoiceAgentProfile', entityArn: voiceAgentArn },
@@ -570,7 +564,7 @@ export class ConnectStack extends cdk.Stack {
           }),
           new iam.PolicyStatement({
             actions: ['wisdom:GetAIAgent'],
-            resources: getAiAgentResources,
+            resources: stableAgentResources,
           }),
         ]),
       });

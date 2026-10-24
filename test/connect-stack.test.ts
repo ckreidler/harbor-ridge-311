@@ -663,31 +663,64 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
     .toBe('branch-identity');
   expect(content.Metadata).toBeUndefined();
 
-  const associateStatements = policyStatements(template).filter((statement) => {
-    const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action];
-    return actions.some((action) => action === 'connect:AssociateSecurityProfiles' || action === 'connect:DisassociateSecurityProfiles');
+  const associationIds = [
+    'AssociateVoiceAgentProfile',
+    'AssociateVoiceAgentVersionProfile',
+    'AssociateChatAgentProfile',
+    'AssociateChatAgentVersionProfile',
+  ];
+  const iamPolicies = template.findResources('AWS::IAM::Policy') as Record<string, {
+    Properties: { PolicyDocument: { Statement: PolicyStatement[] } };
+  }>;
+  const associationPolicies = associationIds.map((id) => {
+    const matches = Object.entries(iamPolicies).filter(([logicalId]) => logicalId.startsWith(id));
+    expect(matches).toHaveLength(1);
+    return matches[0]?.[1];
   });
-  expect(associateStatements.length).toBeGreaterThan(0);
-  for (const statement of associateStatements) {
-    expect(JSON.stringify(statement.Resource)).not.toContain('*');
-    expect(statement.Action).not.toContain('*');
+  for (const policy of associationPolicies) {
+    const document = JSON.stringify(policy?.Properties.PolicyDocument);
+    expect(document).not.toContain('OrchestrationAgentVersion');
+    expect(document).not.toContain('VersionNumber');
+    expect(document).not.toContain('AIAgentArn');
+    expect(document).toContain('SecurityProfileArn');
+    const statements = policy?.Properties.PolicyDocument.Statement ?? [];
+    const actions = statements.flatMap((statement) => [statement.Action].flat()).sort();
+    expect(actions).toEqual([
+      'connect:AssociateSecurityProfiles',
+      'connect:DisassociateSecurityProfiles',
+      'wisdom:GetAIAgent',
+    ]);
+    for (const statement of statements) {
+      expect([statement.Action].flat().some((action) => action.includes('*'))).toBe(false);
+      const resources = resourceValues(statement.Resource);
+      expect(resources.some((resource) => resource.includes('VersionNumber') || resource.includes('Fn::Sub'))).toBe(false);
+      expect(resources.every((resource) => !resource.includes('*') || resource.includes(':*'))).toBe(true);
+      const agentResources = resources.filter((resource) => resource.includes('AIAgentId'));
+      const versioned = agentResources.filter((resource) => resource.includes(':*'));
+      const unqualified = agentResources.filter((resource) => !resource.includes(':*'));
+      if ([statement.Action].flat().includes('wisdom:GetAIAgent')) {
+        expect(resources).toEqual(agentResources);
+        expect(versioned).toHaveLength(2);
+        expect(unqualified).toHaveLength(2);
+      } else {
+        expect(resources.filter((resource) => resource.includes('SecurityProfileArn'))).toHaveLength(1);
+        expect(resources.filter((resource) => !resource.includes('AIAgentId') && !resource.includes('SecurityProfileArn'))).toHaveLength(1);
+        expect(versioned).toHaveLength(2);
+        expect(unqualified).toHaveLength(2);
+      }
+    }
   }
-  const getAgentStatements = policyStatements(template).filter((statement) => {
-    const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action];
-    return actions.includes('wisdom:GetAIAgent');
-  });
-  expect(getAgentStatements).toHaveLength(4);
-  for (const statement of getAgentStatements) {
-    const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action];
-    expect(actions).toEqual(['wisdom:GetAIAgent']);
-    const resources = resourceValues(statement.Resource);
-    expect(resources).toHaveLength(8);
-    expect(resources.filter((resource) => resource.includes('OrchestrationAgentVersion'))).toHaveLength(2);
-    expect(resources.filter((resource) => resource.includes('AIAgentArn') && !resource.includes('OrchestrationAgentVersion'))).toHaveLength(2);
-    expect(resources.filter((resource) => resource.includes('AIAgentId') && resource.includes(':*'))).toHaveLength(2);
-    expect(resources.filter((resource) => resource.includes('AIAgentId') && !resource.includes(':*'))).toHaveLength(2);
-    expect(resources.some((resource) => resource.includes('VersionNumber') || resource.includes('Fn::Sub'))).toBe(false);
-    expect(resources.every((resource) => !resource.includes('*') || resource.includes(':*'))).toBe(true);
+  const associationCalls = template.findResources('Custom::AWS') as Record<string, unknown>;
+  for (const id of associationIds) {
+    const resource = Object.entries(associationCalls).find(([logicalId]) => logicalId.startsWith(id));
+    const text = JSON.stringify(resource?.[1]);
+    expect(text).toContain('EntityArn');
+    expect(text).toContain('AIAgentArn');
+    if (id.includes('Version')) {
+      expect(text).toContain('OrchestrationAgentVersion');
+    } else {
+      expect(text).not.toContain('OrchestrationAgentVersion');
+    }
   }
   const defaultAgentStatements = policyStatements(template).filter((statement) => {
     const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action];
