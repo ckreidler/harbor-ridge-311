@@ -9,29 +9,7 @@
         "FlowLoggingBehavior": "Enabled"
       },
       "Transitions": {
-        "NextAction": "clear-identity"
-      }
-    },
-    {
-      "Identifier": "clear-identity",
-      "Type": "UpdateContactAttributes",
-      "Parameters": {
-        "Attributes": {
-          "customerId": "",
-          "identitySource": "",
-          "contactChannel": ""
-        },
-        "TargetContact": "Current"
-      },
-      "Transitions": {
-        "NextAction": "set-en-voice",
-        "Conditions": [],
-        "Errors": [
-          {
-            "ErrorType": "NoMatchingError",
-            "NextAction": "set-en-voice"
-          }
-        ]
+        "NextAction": "set-en-voice"
       }
     },
     {
@@ -189,8 +167,7 @@
       "Parameters": {
         "Attributes": {
           "customerId": "$.Customer.ProfileId",
-          "identitySource": "chat",
-          "contactChannel": "$.Channel"
+          "identitySource": "chat"
         },
         "TargetContact": "Current"
       },
@@ -285,8 +262,7 @@
       "Parameters": {
         "Attributes": {
           "customerId": "$.Customer.ProfileId",
-          "identitySource": "ani",
-          "contactChannel": "$.Channel"
+          "identitySource": "ani"
         },
         "TargetContact": "Current"
       },

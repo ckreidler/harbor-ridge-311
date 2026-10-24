@@ -7,8 +7,10 @@ import {
   disconnectParticipant,
   flow,
   messageParticipant,
+  updateContactAttributes,
   type ConnectFlowType,
 } from '../lib/flow';
+import { flowPages } from '../lib/flow/pages';
 import { escalationGuideFlow } from '../lib/flows/escalation-guide-flow';
 import { mainFlow } from '../lib/flows/main-flow';
 import { customerQueueFlow } from '../lib/flows/queue-flow';
@@ -34,6 +36,31 @@ function matchesFixture(built: unknown, fixture: string): void {
   expect(Metadata).toBeDefined();
   expect(built).toEqual(body);
 }
+
+test('updateContactAttributes rejects an empty value', () => {
+  expect(() => updateContactAttributes('set-customer-id', {
+    Attributes: { customerId: '' },
+    TargetContact: 'Current',
+  }, { next: 'next', error: 'next' })).toThrow('attribute "customerId" is empty');
+});
+
+test('compiled flows set no empty contact attributes', () => {
+  for (const page of flowPages()) {
+    for (const action of page.content.Actions) {
+      if (action.Type !== 'UpdateContactAttributes') continue;
+      const attributes = action.Parameters.Attributes;
+      expect(attributes && typeof attributes === 'object' && !Array.isArray(attributes)).toBe(true);
+      for (const [name, value] of Object.entries(attributes as Record<string, unknown>)) {
+        expect({ flow: page.name, action: action.Identifier, attribute: name, empty: value === '' }).toEqual({
+          flow: page.name,
+          action: action.Identifier,
+          attribute: name,
+          empty: false,
+        });
+      }
+    }
+  }
+});
 
 test('builder MainFlow matches the current snapshot', () => {
   const snapshot = JSON.parse(fs.readFileSync(

@@ -199,7 +199,7 @@ export function addTickets(stack: cdk.Stack, instanceArn: string, instanceId: st
     path.join(__dirname, 'interceptor.ts'),
   );
   interceptor.addToRolePolicy(new iam.PolicyStatement({
-    actions: ['connect:GetContactAttributes'],
+    actions: ['connect:DescribeContact', 'connect:GetContactAttributes'],
     resources: [cdk.Fn.join('', [instanceArn, '/contact/*'])],
   }));
 

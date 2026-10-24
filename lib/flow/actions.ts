@@ -211,6 +211,11 @@ export function updateContactAttributes(
   },
   branches: Branches,
 ): Action<'UpdateContactAttributes'> {
+  for (const [name, value] of Object.entries(parameters.Attributes)) {
+    if (value.length === 0) {
+      throw new Error(`UpdateContactAttributes "${key}" attribute "${name}" is empty`);
+    }
+  }
   return simple(key, 'UpdateContactAttributes', parameters, branches);
 }
 

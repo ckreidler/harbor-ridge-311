@@ -8,7 +8,7 @@ import {
   type IdSource,
 } from '../lib/tickets/api';
 import { API_ROUTES, handleTicketEvent } from '../lib/tickets/handler';
-import { bindCustomer } from '../lib/tickets/interceptor';
+import { bindCustomer, verifiedContact } from '../lib/tickets/interceptor';
 import {
   LIMITS,
   TICKET_ID_ALPHABET,
@@ -325,16 +325,36 @@ function callEvent(name: string, args: Record<string, unknown>) {
   };
 }
 
+test('verifiedContact uses DescribeContact channel and ignores a contact attribute', () => {
+  expect(verifiedContact({
+    customerId: customer,
+    identitySource: IDENTITY_SOURCE_ANI,
+    contactChannel: 'CHAT',
+  }, 'VOICE')).toEqual({
+    customerId: customer,
+    identitySource: IDENTITY_SOURCE_ANI,
+    channel: 'VOICE',
+  });
+  expect(verifiedContact({
+    customerId: '',
+    identitySource: '',
+  }, '')).toEqual({
+    customerId: undefined,
+    identitySource: undefined,
+    channel: undefined,
+  });
+});
+
 test('the request interceptor overwrites customerId and blocks chat reads', async () => {
   const voice = {
     customerId: customer,
     identitySource: IDENTITY_SOURCE_ANI,
-    contactChannel: 'VOICE',
+    channel: 'VOICE',
   };
   const chat = {
     customerId: 'chat-profile',
     identitySource: IDENTITY_SOURCE_CHAT,
-    contactChannel: 'CHAT',
+    channel: 'CHAT',
   };
   const args = {
     customerId: 'model-chose-this',
@@ -363,7 +383,7 @@ test('the request interceptor overwrites customerId and blocks chat reads', asyn
   const cleared = await bindCustomer(callEvent('createTicket', args), async () => ({
     customerId: '',
     identitySource: '',
-    contactChannel: '',
+    channel: '',
   }));
   expect(cleared.mcp.transformedGatewayResponse?.body).toMatchObject({
     error: { code: -32602, message: 'A verified customer profile is required.' },
@@ -372,7 +392,7 @@ test('the request interceptor overwrites customerId and blocks chat reads', asyn
   const missing = await bindCustomer(callEvent('getTicket', args), async () => ({
     customerId: undefined,
     identitySource: undefined,
-    contactChannel: 'VOICE',
+    channel: 'VOICE',
   }));
   expect(missing.mcp.transformedGatewayResponse?.body).toMatchObject({
     error: { code: -32602, message: 'A verified customer profile is required.' },

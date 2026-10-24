@@ -3,7 +3,6 @@
 ```mermaid
 flowchart TD
   n_enable_flow_logging(["enable-flow-logging<br/>UpdateFlowLoggingBehavior"])
-  n_clear_identity["clear-identity<br/>UpdateContactAttributes"]
   n_set_en_voice["set-en-voice<br/>UpdateContactTextToSpeechVoice"]
   n_lookup_prompts["lookup-prompts<br/>EvaluateDataTableValues"]
   n_play_greeting["play-greeting<br/>MessageParticipant"]
@@ -39,8 +38,7 @@ flowchart TD
   n_play_goodbye["play-goodbye<br/>MessageParticipant"]
   n_play_fallback["play-fallback<br/>MessageParticipant"]
   n_disconnect["disconnect<br/>DisconnectParticipant"]
-  n_enable_flow_logging -->|"next"| n_clear_identity
-  n_clear_identity -->|"NoMatchingError"| n_set_en_voice
+  n_enable_flow_logging -->|"next"| n_set_en_voice
   n_set_en_voice -->|"NoMatchingError"| n_lookup_prompts
   n_lookup_prompts -->|"next"| n_play_greeting
   n_lookup_prompts -->|"NoMatchingError"| n_play_fallback

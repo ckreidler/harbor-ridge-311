@@ -23,7 +23,6 @@ import {
   type DataTableQuery,
 } from '../flow';
 import {
-  CONTACT_CHANNEL_ATTRIBUTE,
   CUSTOMER_ID_ATTRIBUTE,
   IDENTITY_SOURCE_ANI,
   IDENTITY_SOURCE_ATTRIBUTE,
@@ -100,15 +99,7 @@ export function mainFlow(props: MainFlowProps): CompiledFlow<typeof CONTACT_FLOW
     actions: [
       updateFlowLoggingBehavior('enable-flow-logging', {
         FlowLoggingBehavior: 'Enabled',
-      }, { next: 'clear-identity' }),
-      updateContactAttributes('clear-identity', {
-        Attributes: {
-          [CUSTOMER_ID_ATTRIBUTE]: '',
-          [IDENTITY_SOURCE_ATTRIBUTE]: '',
-          [CONTACT_CHANNEL_ATTRIBUTE]: '',
-        },
-        TargetContact: 'Current',
-      }, { next: 'set-en-voice', error: 'set-en-voice' }),
+      }, { next: 'set-en-voice' }),
       updateContactTextToSpeechVoice('set-en-voice', {
         TextToSpeechVoice: 'Joanna',
         TextToSpeechEngine: 'Neural',
@@ -141,7 +132,6 @@ export function mainFlow(props: MainFlowProps): CompiledFlow<typeof CONTACT_FLOW
         Attributes: {
           [CUSTOMER_ID_ATTRIBUTE]: '$.Customer.ProfileId',
           [IDENTITY_SOURCE_ATTRIBUTE]: IDENTITY_SOURCE_CHAT,
-          [CONTACT_CHANNEL_ATTRIBUTE]: '$.Channel',
         },
         TargetContact: 'Current',
       }, { next: 'create-assistant-session', error: 'create-assistant-session' }),
@@ -170,7 +160,6 @@ export function mainFlow(props: MainFlowProps): CompiledFlow<typeof CONTACT_FLOW
         Attributes: {
           [CUSTOMER_ID_ATTRIBUTE]: '$.Customer.ProfileId',
           [IDENTITY_SOURCE_ATTRIBUTE]: IDENTITY_SOURCE_ANI,
-          [CONTACT_CHANNEL_ATTRIBUTE]: '$.Channel',
         },
         TargetContact: 'Current',
       }, { next: 'create-assistant-session', error: 'create-assistant-session' }),

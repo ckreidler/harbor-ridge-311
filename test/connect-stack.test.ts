@@ -213,9 +213,8 @@ test('ConnectStack looks up the English prompts and associates the sandbox numbe
   expect(content.Actions.find((action) => action.Identifier === 'set-en-voice')?.Parameters?.TextToSpeechVoice)
     .toBe('Joanna');
   expect(content.Actions.find((action) => action.Identifier === 'enable-flow-logging')?.Transitions?.NextAction)
-    .toBe('clear-identity');
-  expect(content.Actions.find((action) => action.Identifier === 'clear-identity')?.Transitions?.NextAction)
     .toBe('set-en-voice');
+  expect(content.Actions.some((action) => action.Identifier === 'clear-identity')).toBe(false);
   expect(content.Metadata).toBeUndefined();
   const recordIds = Object.keys(template.findResources('AWS::Connect::DataTableRecord'));
   const dependsOn = [flow.DependsOn].flat();
@@ -744,12 +743,9 @@ test('ConnectStack opens an after-hours case and removes voicemail', () => {
     return found;
   };
   expect(main.StartAction).toBe('enable-flow-logging');
-  expect(logging?.Transitions?.NextAction).toBe('clear-identity');
-  expect(main.Actions.find((action) => action.Identifier === 'clear-identity')?.Parameters?.Attributes).toEqual({
-    customerId: '',
-    identitySource: '',
-    contactChannel: '',
-  });
+  expect(logging?.Transitions?.NextAction).toBe('set-en-voice');
+  expect(main.Actions.some((action) => action.Identifier === 'clear-identity')).toBe(false);
+  expect(JSON.stringify(main)).not.toContain('contactChannel');
   expect(main.Actions.some((action) => action.Identifier === 'set-en-language')).toBe(false);
   expect(hoursCheck?.Type).toBe('CheckHoursOfOperation');
   expect(hoursCheck?.Transitions?.Conditions?.find((branch) => branch.Condition.Operands[0] === 'True')?.NextAction)
@@ -982,6 +978,10 @@ test('ConnectStack stores customer-scoped tickets behind an IAM API and a JWT ga
   const contactAttribute = policyStatements(template).find((statement) => (
     [statement.Action].flat().includes('connect:GetContactAttributes')
   ));
+  expect([contactAttribute?.Action].flat().sort()).toEqual([
+    'connect:DescribeContact',
+    'connect:GetContactAttributes',
+  ]);
   expect(JSON.stringify(contactAttribute?.Resource)).toContain('/contact/*');
   expect(JSON.stringify(contactAttribute?.Resource)).not.toMatch(/"\*"/);
 
@@ -1006,6 +1006,7 @@ test('ConnectStack stores customer-scoped tickets behind an IAM API and a JWT ga
       action.startsWith('execute-api:')
       || action.startsWith('bedrock-agentcore:')
       || action === 'connect:GetContactAttributes'
+      || action === 'connect:DescribeContact'
       || action === 'connect:DescribeInstance'
     ));
   });

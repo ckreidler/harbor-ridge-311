@@ -1,6 +1,5 @@
-import { ConnectClient, GetContactAttributesCommand } from '@aws-sdk/client-connect';
+import { ConnectClient, DescribeContactCommand, GetContactAttributesCommand } from '@aws-sdk/client-connect';
 import {
-  CONTACT_CHANNEL_ATTRIBUTE,
   CUSTOMER_ID_ATTRIBUTE,
   IDENTITY_SOURCE_ANI,
   IDENTITY_SOURCE_ATTRIBUTE,
@@ -26,7 +25,18 @@ export interface InterceptorOutput {
 export interface VerifiedContact {
   readonly customerId: string | undefined;
   readonly identitySource: string | undefined;
-  readonly contactChannel: string | undefined;
+  readonly channel: string | undefined;
+}
+
+export function verifiedContact(
+  attributes: Record<string, string> | undefined,
+  channel: string | undefined,
+): VerifiedContact {
+  return {
+    customerId: attribute(attributes, CUSTOMER_ID_ATTRIBUTE),
+    identitySource: attribute(attributes, IDENTITY_SOURCE_ATTRIBUTE),
+    channel: typeof channel === 'string' && channel.length > 0 ? channel : undefined,
+  };
 }
 
 export type ContactLookup = (instanceId: string, contactId: string) => Promise<VerifiedContact>;
@@ -109,14 +119,14 @@ export async function bindCustomer(event: unknown, lookup: ContactLookup): Promi
     return reject(body.id, PROFILE_REQUIRED);
   }
   if (READ_TOOLS.has(operation)) {
-    if (verified.contactChannel !== 'VOICE' || verified.identitySource !== IDENTITY_SOURCE_ANI) {
+    if (verified.channel !== 'VOICE' || verified.identitySource !== IDENTITY_SOURCE_ANI) {
       return reject(body.id, CALL_TO_CHANGE);
     }
   } else if (operation === 'createTicket') {
-    if (verified.contactChannel !== 'VOICE' && verified.contactChannel !== 'CHAT') {
+    if (verified.channel !== 'VOICE' && verified.channel !== 'CHAT') {
       return reject(body.id, PROFILE_REQUIRED);
     }
-    args.channel = verified.contactChannel;
+    args.channel = verified.channel;
   } else {
     return reject(body.id, PROFILE_REQUIRED);
   }
@@ -131,14 +141,16 @@ export async function bindCustomer(event: unknown, lookup: ContactLookup): Promi
 export async function handler(event: unknown): Promise<InterceptorOutput> {
   const client = new ConnectClient({});
   return bindCustomer(event, async (instanceId, contactId) => {
-    const result = await client.send(new GetContactAttributesCommand({
-      InstanceId: instanceId,
-      InitialContactId: contactId,
-    }));
-    return {
-      customerId: attribute(result.Attributes, CUSTOMER_ID_ATTRIBUTE),
-      identitySource: attribute(result.Attributes, IDENTITY_SOURCE_ATTRIBUTE),
-      contactChannel: attribute(result.Attributes, CONTACT_CHANNEL_ATTRIBUTE),
-    };
+    const [attributes, contact] = await Promise.all([
+      client.send(new GetContactAttributesCommand({
+        InstanceId: instanceId,
+        InitialContactId: contactId,
+      })),
+      client.send(new DescribeContactCommand({
+        InstanceId: instanceId,
+        ContactId: contactId,
+      })),
+    ]);
+    return verifiedContact(attributes.Attributes, contact.Contact?.Channel);
   });
 }

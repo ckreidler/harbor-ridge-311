@@ -159,13 +159,8 @@ test('main flow looks up prompt text by channel and plays the greeting on succes
   expect(flow.Actions.some((action) => action.Identifier === 'check-prompt')).toBe(false);
   expect(flow.Actions.some((action) => action.Identifier === 'set-en-language')).toBe(false);
   expect(JSON.stringify(flow)).not.toContain('LanguageCode');
-  expect(block('enable-flow-logging').Transitions.NextAction).toBe('clear-identity');
-  expect(block('clear-identity').Parameters.Attributes).toEqual({
-    customerId: '',
-    identitySource: '',
-    contactChannel: '',
-  });
-  expect(block('clear-identity').Transitions.NextAction).toBe('set-en-voice');
+  expect(block('enable-flow-logging').Transitions.NextAction).toBe('set-en-voice');
+  expect(flow.Actions.some((action) => action.Identifier === 'clear-identity')).toBe(false);
   expect(block('play-greeting').Transitions).toMatchObject({
     NextAction: 'branch-identity',
     Errors: [{ ErrorType: 'NoMatchingError', NextAction: 'play-fallback' }],
@@ -299,7 +294,7 @@ test('phone callers are matched by ANI and chat does not use email', () => {
     { ErrorType: 'NoMatchingError', NextAction: 'create-assistant-session' },
   ]);
   expect(JSON.stringify(block('set-chat-identity').Parameters)).toContain('"identitySource":"chat"');
-  expect(JSON.stringify(block('set-chat-identity').Parameters)).toContain('"contactChannel":"$.Channel"');
+  expect(JSON.stringify(block('set-chat-identity').Parameters)).not.toContain('contactChannel');
   expect(block('check-caller-phone').Parameters.ComparisonValue).toBe('$.CustomerEndpoint.Address');
   expect(block('find-profile-phone').Parameters.ProfileRequestData).toEqual({
     IdentifierName: '_phone',
@@ -314,7 +309,7 @@ test('phone callers are matched by ANI and chat does not use email', () => {
   ]);
   expect(JSON.stringify(block('set-customer-id').Parameters)).toContain('"customerId":"$.Customer.ProfileId"');
   expect(JSON.stringify(block('set-customer-id').Parameters)).toContain('"identitySource":"ani"');
-  expect(JSON.stringify(block('set-customer-id').Parameters)).toContain('"contactChannel":"$.Channel"');
+  expect(JSON.stringify(block('set-customer-id').Parameters)).not.toContain('contactChannel');
   expect(block('set-customer-id').Transitions.NextAction).toBe('create-assistant-session');
   expect(block('set-customer-id').Transitions.Errors?.[0].NextAction).toBe('create-assistant-session');
   expect(JSON.stringify(block('select-orchestrator').Parameters)).toContain('"customerId":"$.Attributes.customerId"');
