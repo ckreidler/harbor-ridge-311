@@ -964,6 +964,34 @@ test('ConnectStack stores customer-scoped tickets behind an IAM API and a JWT ga
   expect(ticketTarget.Properties.CredentialProviderConfigurations).toEqual([
     { CredentialProviderType: 'GATEWAY_IAM_ROLE' },
   ]);
+  template.hasResourceProperties('AWS::Logs::LogGroup', {
+    LogGroupName: '/aws/vendedlogs/bedrock-agentcore/gateway/HarborRidge311Tickets',
+    RetentionInDays: 3,
+  });
+  template.hasResourceProperties('AWS::Logs::DeliverySource', {
+    Name: 'HarborRidge311-TicketGateway-ApplicationLogs',
+    LogType: 'APPLICATION_LOGS',
+  });
+  const deliverySource = Object.values(template.findResources('AWS::Logs::DeliverySource'))[0] as {
+    Properties: { ResourceArn: unknown };
+  };
+  expect(JSON.stringify(deliverySource.Properties.ResourceArn)).toContain('TicketGateway');
+  expect(JSON.stringify(deliverySource.Properties.ResourceArn)).toContain('GatewayArn');
+  template.hasResourceProperties('AWS::Logs::DeliveryDestination', {
+    Name: 'HarborRidge311-TicketGateway-ApplicationLogsDestination',
+    DeliveryDestinationType: 'CWL',
+  });
+  const deliveryDestinationText = JSON.stringify(template.findResources('AWS::Logs::DeliveryDestination'));
+  expect(deliveryDestinationText).toContain('TicketGatewayApplicationLogs');
+  expect(deliveryDestinationText).toContain(':log-group:');
+  expect(deliveryDestinationText).not.toContain(':*');
+  const delivery = Object.values(template.findResources('AWS::Logs::Delivery'))[0] as {
+    Properties: { DeliverySourceName: string; DeliveryDestinationArn: unknown };
+    DependsOn?: string | string[];
+  };
+  expect(delivery.Properties.DeliverySourceName).toBe('HarborRidge311-TicketGateway-ApplicationLogs');
+  expect(JSON.stringify(delivery.Properties.DeliveryDestinationArn)).toContain('TicketGatewayLogDestination');
+  expect([delivery.DependsOn].flat().some((dependency) => dependency?.startsWith('TicketGatewayLogSource'))).toBe(true);
   template.hasResourceProperties('AWS::AppIntegrations::Application', {
     Name: 'HarborRidge311Tickets',
     ApplicationType: 'MCP_SERVER',

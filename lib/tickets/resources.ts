@@ -247,6 +247,33 @@ export function addTickets(stack: cdk.Stack, instanceArn: string, instanceId: st
     interceptorConfigurations: interceptors,
   };
   const gateway = new bedrockagentcore.CfnGateway(stack, 'TicketGateway', gatewayConfig);
+  const gatewayLogGroupName = '/aws/vendedlogs/bedrock-agentcore/gateway/HarborRidge311Tickets';
+  const gatewayLogs = new logs.LogGroup(stack, 'TicketGatewayApplicationLogs', {
+    logGroupName: gatewayLogGroupName,
+    retention: logs.RetentionDays.THREE_DAYS,
+    removalPolicy: cdk.RemovalPolicy.DESTROY,
+  });
+  const gatewayLogSourceName = 'HarborRidge311-TicketGateway-ApplicationLogs';
+  const gatewayLogSource = new logs.CfnDeliverySource(stack, 'TicketGatewayLogSource', {
+    name: gatewayLogSourceName,
+    logType: 'APPLICATION_LOGS',
+    resourceArn: gateway.attrGatewayArn,
+  });
+  const gatewayLogDestination = new logs.CfnDeliveryDestination(stack, 'TicketGatewayLogDestination', {
+    name: 'HarborRidge311-TicketGateway-ApplicationLogsDestination',
+    deliveryDestinationType: 'CWL',
+    destinationResourceArn: stack.formatArn({
+      service: 'logs',
+      resource: 'log-group',
+      arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME,
+      resourceName: gatewayLogs.logGroupName,
+    }),
+  });
+  const gatewayLogDelivery = new logs.CfnDelivery(stack, 'TicketGatewayLogDelivery', {
+    deliverySourceName: gatewayLogSourceName,
+    deliveryDestinationArn: gatewayLogDestination.attrArn,
+  });
+  gatewayLogDelivery.node.addDependency(gatewayLogSource);
   interceptor.addPermission('AllowThisGateway', {
     principal: new iam.ServicePrincipal('bedrock-agentcore.amazonaws.com'),
     sourceArn: gateway.attrGatewayArn,
