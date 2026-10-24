@@ -65,20 +65,27 @@ export function mermaidFromDiagram(body: string, name = 'diagram page'): string 
 export function snapshotsFromPages(
   pages: ReadonlyArray<{ name: string; body: string; content?: unknown }>,
 ): FlowSnapshot[] {
-  return pages.map((page) => ({
-    name: page.name,
-    content: page.content === undefined ? null : page.content,
-    mermaid: mermaidFromDiagram(page.body, page.name),
-  }));
+  return pages.map((page) => {
+    if (page.content === undefined || page.content === null) {
+      throw new Error(`${page.name} is missing compiled content`);
+    }
+    return {
+      name: page.name,
+      content: page.content,
+      mermaid: mermaidFromDiagram(page.body, page.name),
+    };
+  });
 }
 
-function hasContent(flow: FlowSnapshot): boolean {
-  return flow.content !== null && flow.content !== undefined;
+function compiled(flow: FlowSnapshot): unknown {
+  if (flow.content === null || flow.content === undefined) {
+    throw new Error(`${flow.name} is missing compiled content`);
+  }
+  return flow.content;
 }
 
 function differs(left: FlowSnapshot, right: FlowSnapshot): boolean {
-  if (!hasContent(left) || !hasContent(right)) return left.mermaid !== right.mermaid;
-  return stableStringify(left.content) !== stableStringify(right.content);
+  return stableStringify(compiled(left)) !== stableStringify(compiled(right));
 }
 
 export function changedFlows(base: readonly FlowSnapshot[], head: readonly FlowSnapshot[]): ChangedFlow[] {
@@ -135,7 +142,12 @@ export async function loadFlowSnapshots(root: string): Promise<FlowSnapshot[]> {
   if (!fs.existsSync(file)) throw new Error(`missing ${file}`);
   const loaded = await import(pathToFileURL(file).href) as PagesModule;
   if (typeof loaded.flowPages !== 'function') throw new Error(`${file} does not export flowPages`);
-  return snapshotsFromPages(loaded.flowPages());
+  try {
+    return snapshotsFromPages(loaded.flowPages());
+  } catch (error) {
+    if (error instanceof Error) throw new Error(`${error.message} (${file})`);
+    throw error;
+  }
 }
 
 function revision(value: string): string {

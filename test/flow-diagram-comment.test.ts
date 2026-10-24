@@ -41,12 +41,13 @@ test('compiled content differences ignore key order and include parameter-only e
   expect(changedFlows(base, head)).toEqual([{ name: base[0].name, mermaid: base[0].mermaid }]);
 });
 
-test('missing compiled content falls back to the diagram text', () => {
+test('missing compiled content is an error', () => {
   const head = pages();
   const legacy = head.map(({ name, mermaid }) => ({ name, mermaid, content: null }));
-  expect(changedFlows(legacy, head)).toEqual([]);
-  const tweaked = legacy.map((flow, index) => index === 0 ? { ...flow, mermaid: `${flow.mermaid}\n  n_extra["extra"]` } : flow);
-  expect(changedFlows(tweaked, head)).toEqual([{ name: head[0].name, mermaid: head[0].mermaid }]);
+  expect(() => changedFlows(legacy, head)).toThrow(`${head[0].name} is missing compiled content`);
+  expect(() => snapshotsFromPages([{ name: 'HarborRidge311-Queue', body: '```mermaid\nflowchart TD\n```' }])).toThrow(
+    'HarborRidge311-Queue is missing compiled content',
+  );
 });
 
 test('added and removed flows are included', () => {
