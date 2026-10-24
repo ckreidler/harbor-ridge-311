@@ -933,11 +933,25 @@ test('ConnectStack stores customer-scoped tickets behind an IAM API and a JWT ga
   expect(JSON.stringify(apiBody)).toContain('customerId');
   expect(JSON.stringify(apiBody)).toContain('subject');
 
+  const mcpVersions = ['2025-03-26', '2025-11-25', '2026-07-28'];
   template.hasResourceProperties('AWS::BedrockAgentCore::Gateway', {
     Name: 'HarborRidge311Tickets',
     ProtocolType: 'MCP',
     AuthorizerType: 'CUSTOM_JWT',
+    ProtocolConfiguration: {
+      Mcp: {
+        SupportedVersions: mcpVersions,
+      },
+    },
   });
+  const updateGateway = Object.values(template.findResources('Custom::AWS')).find((resource) => (
+    JSON.stringify(resource).includes('updateGateway')
+  ));
+  const updateGatewayText = JSON.stringify(updateGateway);
+  expect(updateGatewayText).toContain('protocolConfiguration');
+  for (const version of mcpVersions) {
+    expect(updateGatewayText).toContain(version);
+  }
   template.hasResourceProperties('AWS::BedrockAgentCore::GatewayTarget', {
     Name: 'Tickets',
     CredentialProviderConfigurations: [{

@@ -13,7 +13,7 @@ import * as cr from 'aws-cdk-lib/custom-resources';
 import { ticketOpenApiDocument } from './openapi';
 import { TICKET_API_STAGE, TICKET_GATEWAY_NAME, TICKET_TARGET_NAME } from './tools';
 
-const MCP_VERSION = '2025-03-26';
+const MCP_VERSIONS = ['2025-03-26', '2025-11-25', '2026-07-28'];
 
 export interface TicketSystem {
   readonly lambdaArn: string;
@@ -234,7 +234,7 @@ export function addTickets(stack: cdk.Stack, instanceArn: string, instanceId: st
     roleArn: gatewayRole.roleArn,
     protocolConfiguration: {
       mcp: {
-        supportedVersions: [MCP_VERSION],
+        supportedVersions: MCP_VERSIONS,
         instructions: 'Harbor Ridge 311 tickets for the signed-in customer.',
       },
     },
