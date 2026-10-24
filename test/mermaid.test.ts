@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { flowPages } from '../bin/diagrams';
+import { flowPages } from '../lib/flow/pages';
 import {
   checkHoursOfOperation,
   compare,
@@ -36,20 +36,15 @@ test('toMermaid labels actions and branches in flow order', () => {
 
   expect(toMermaid(compiled)).toBe([
     'flowchart TD',
-    '  n_hours["hours<br/>CheckHoursOfOperation"]',
+    '  n_hours(["hours<br/>CheckHoursOfOperation"])',
     '  n_open["open<br/>MessageParticipant"]',
     '  n_closed["closed<br/>Compare"]',
     '  n_end["end<br/>DisconnectParticipant"]',
-    '  n_hours -->|"next"| n_open',
     '  n_hours -->|"inHours"| n_open',
     '  n_hours -->|"outOfHours"| n_closed',
-    '  n_hours -->|"NoMatchingError"| n_closed',
-    '  n_open -->|"next"| n_end',
     '  n_open -->|"NoMatchingError"| n_end',
-    '  n_closed -->|"next"| n_end',
     '  n_closed -->|"CHAT"| n_open',
     '  n_closed -->|"Exists"| n_end',
-    '  n_closed -->|"NoMatchingCondition"| n_end',
   ].join('\n'));
   expect(toMermaid(compiled)).toBe(toMermaid(compiled));
 });
@@ -67,7 +62,7 @@ test('toMermaid escapes labels that would break flowchart syntax', () => {
   };
   expect(toMermaid(compiled)).toBe([
     'flowchart TD',
-    '  n_a_b["a#quot;b<br/>DisconnectParticipant"]',
+    '  n_a_b(["a#quot;b<br/>DisconnectParticipant"])',
   ].join('\n'));
 });
 

@@ -65,17 +65,26 @@ function conditionLabel(
 }
 
 function edges(type: string, transitions: FlowTransitions): Edge[] {
-  return [
-    ...(transitions.NextAction === undefined ? [] : [{ label: 'next', to: transitions.NextAction }]),
-    ...(transitions.Conditions ?? []).map((branch) => ({
-      label: conditionLabel(type, branch.Condition),
-      to: branch.NextAction,
-    })),
-    ...(transitions.Errors ?? []).map((branch) => ({
-      label: branch.ErrorType,
-      to: branch.NextAction,
-    })),
-  ];
+  const seen = new Set<string>();
+  const named: Edge[] = [];
+  for (const branch of transitions.Conditions ?? []) {
+    if (seen.has(branch.NextAction)) {
+      continue;
+    }
+    seen.add(branch.NextAction);
+    named.push({ label: conditionLabel(type, branch.Condition), to: branch.NextAction });
+  }
+  for (const branch of transitions.Errors ?? []) {
+    if (seen.has(branch.NextAction)) {
+      continue;
+    }
+    seen.add(branch.NextAction);
+    named.push({ label: branch.ErrorType, to: branch.NextAction });
+  }
+  if (transitions.NextAction !== undefined && !seen.has(transitions.NextAction)) {
+    return [{ label: 'next', to: transitions.NextAction }, ...named];
+  }
+  return named;
 }
 
 export function toMermaid(content: FlowContent): string {
@@ -83,7 +92,11 @@ export function toMermaid(content: FlowContent): string {
   const idFor = (key: string) => ids.get(key) ?? nodeId(key);
   const lines = ['flowchart TD'];
   for (const action of content.Actions) {
-    lines.push(`  ${idFor(action.Identifier)}["${escapeLabel(action.Identifier)}<br/>${escapeLabel(action.Type)}"]`);
+    const label = `${escapeLabel(action.Identifier)}<br/>${escapeLabel(action.Type)}`;
+    const id = idFor(action.Identifier);
+    lines.push(action.Identifier === content.StartAction
+      ? `  ${id}(["${label}"])`
+      : `  ${id}["${label}"]`);
   }
   for (const action of content.Actions) {
     for (const edge of edges(action.Type, action.Transitions)) {
