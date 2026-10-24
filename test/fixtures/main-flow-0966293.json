@@ -1,224 +1,6 @@
 {
   "Version": "2019-10-30",
   "StartAction": "enable-flow-logging",
-  "Metadata": {
-    "entryPointPosition": {
-      "x": 40,
-      "y": 360
-    },
-    "ActionMetadata": {
-      "enable-flow-logging": {
-        "position": {
-          "x": 160,
-          "y": 360
-        }
-      },
-      "set-en-voice": {
-        "position": {
-          "x": 440,
-          "y": 360
-        }
-      },
-      "lookup-prompts": {
-        "position": {
-          "x": 720,
-          "y": 360
-        }
-      },
-      "play-greeting": {
-        "position": {
-          "x": 1000,
-          "y": 360
-        }
-      },
-      "play-fallback": {
-        "position": {
-          "x": 1000,
-          "y": 640
-        }
-      },
-      "create-assistant-session": {
-        "position": {
-          "x": 1280,
-          "y": 360
-        }
-      },
-      "select-orchestrator": {
-        "position": {
-          "x": 1560,
-          "y": 360
-        }
-      },
-      "ask-en-question": {
-        "position": {
-          "x": 1840,
-          "y": 360
-        }
-      },
-      "check-tool": {
-        "position": {
-          "x": 2120,
-          "y": 360
-        }
-      },
-      "play-goodbye": {
-        "position": {
-          "x": 2400,
-          "y": 80
-        }
-      },
-      "set-escalation": {
-        "position": {
-          "x": 2400,
-          "y": 640
-        }
-      },
-      "check-hours": {
-        "position": {
-          "x": 2680,
-          "y": 640
-        }
-      },
-      "set-event-flow": {
-        "position": {
-          "x": 2960,
-          "y": 640
-        }
-      },
-      "set-working-queue": {
-        "position": {
-          "x": 3240,
-          "y": 640
-        }
-      },
-      "set-customer-queue": {
-        "position": {
-          "x": 3520,
-          "y": 640
-        }
-      },
-      "transfer-to-queue": {
-        "position": {
-          "x": 3800,
-          "y": 640
-        }
-      },
-      "check-case-title": {
-        "position": {
-          "x": 3240,
-          "y": 920
-        }
-      },
-      "set-case-title": {
-        "position": {
-          "x": 3520,
-          "y": 920
-        }
-      },
-      "set-fallback-title": {
-        "position": {
-          "x": 3520,
-          "y": 1200
-        }
-      },
-      "create-case": {
-        "position": {
-          "x": 3800,
-          "y": 920
-        }
-      },
-      "create-case-other": {
-        "position": {
-          "x": 3800,
-          "y": 1200
-        }
-      },
-      "get-case": {
-        "position": {
-          "x": 4080,
-          "y": 920
-        }
-      },
-      "branch-case-hold": {
-        "position": {
-          "x": 4080,
-          "y": 1200
-        }
-      },
-      "play-case-hold-chat": {
-        "position": {
-          "x": 4360,
-          "y": 1200
-        }
-      },
-      "wait-case": {
-        "position": {
-          "x": 4640,
-          "y": 1200
-        }
-      },
-      "get-case-retry": {
-        "position": {
-          "x": 4920,
-          "y": 1200
-        }
-      },
-      "play-case-hold-voice": {
-        "position": {
-          "x": 4360,
-          "y": 1480
-        }
-      },
-      "lookup-after-hours-case": {
-        "position": {
-          "x": 4360,
-          "y": 920
-        }
-      },
-      "check-case-prompt": {
-        "position": {
-          "x": 4640,
-          "y": 920
-        }
-      },
-      "check-reference": {
-        "position": {
-          "x": 4920,
-          "y": 920
-        }
-      },
-      "branch-case-channel": {
-        "position": {
-          "x": 5200,
-          "y": 920
-        }
-      },
-      "play-case-chat": {
-        "position": {
-          "x": 5480,
-          "y": 920
-        }
-      },
-      "play-case-voice": {
-        "position": {
-          "x": 5480,
-          "y": 1200
-        }
-      },
-      "play-closed": {
-        "position": {
-          "x": 3240,
-          "y": 1200
-        }
-      },
-      "disconnect": {
-        "position": {
-          "x": 3240,
-          "y": 360
-        }
-      }
-    }
-  },
   "Actions": [
     {
       "Identifier": "enable-flow-logging",
@@ -239,13 +21,13 @@
       },
       "Transitions": {
         "NextAction": "lookup-prompts",
+        "Conditions": [],
         "Errors": [
           {
             "ErrorType": "NoMatchingError",
             "NextAction": "lookup-prompts"
           }
-        ],
-        "Conditions": []
+        ]
       }
     },
     {
@@ -306,13 +88,13 @@
       },
       "Transitions": {
         "NextAction": "play-greeting",
+        "Conditions": [],
         "Errors": [
           {
             "ErrorType": "NoMatchingError",
             "NextAction": "play-fallback"
           }
-        ],
-        "Conditions": []
+        ]
       }
     },
     {
@@ -322,14 +104,209 @@
         "Text": "$.DataTables.Greeting.Text"
       },
       "Transitions": {
-        "NextAction": "create-assistant-session",
+        "NextAction": "branch-identity",
+        "Conditions": [],
         "Errors": [
           {
             "ErrorType": "NoMatchingError",
             "NextAction": "play-fallback"
           }
+        ]
+      }
+    },
+    {
+      "Identifier": "branch-identity",
+      "Type": "Compare",
+      "Parameters": {
+        "ComparisonValue": "$.Channel"
+      },
+      "Transitions": {
+        "NextAction": "check-caller-phone",
+        "Conditions": [
+          {
+            "NextAction": "check-chat-email",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": [
+                "CHAT"
+              ]
+            }
+          }
         ],
-        "Conditions": []
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingCondition",
+            "NextAction": "check-caller-phone"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "check-chat-email",
+      "Type": "Compare",
+      "Parameters": {
+        "ComparisonValue": "$.Attributes.email"
+      },
+      "Transitions": {
+        "NextAction": "create-assistant-session",
+        "Conditions": [
+          {
+            "NextAction": "find-profile-email",
+            "Condition": {
+              "Operator": "Exists",
+              "Operands": []
+            }
+          }
+        ],
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingCondition",
+            "NextAction": "create-assistant-session"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "check-caller-phone",
+      "Type": "Compare",
+      "Parameters": {
+        "ComparisonValue": "$.CustomerEndpoint.Address"
+      },
+      "Transitions": {
+        "NextAction": "create-assistant-session",
+        "Conditions": [
+          {
+            "NextAction": "find-profile-phone",
+            "Condition": {
+              "Operator": "Exists",
+              "Operands": []
+            }
+          }
+        ],
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingCondition",
+            "NextAction": "create-assistant-session"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "find-profile-phone",
+      "Type": "GetCustomerProfile",
+      "Parameters": {
+        "ProfileRequestData": {
+          "IdentifierName": "_phone",
+          "IdentifierValue": "$.CustomerEndpoint.Address"
+        },
+        "ProfileResponseData": []
+      },
+      "Transitions": {
+        "NextAction": "set-customer-id",
+        "Conditions": [],
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "create-assistant-session"
+          },
+          {
+            "ErrorType": "NoneFoundError",
+            "NextAction": "create-profile-phone"
+          },
+          {
+            "ErrorType": "MultipleFoundError",
+            "NextAction": "create-assistant-session"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "find-profile-email",
+      "Type": "GetCustomerProfile",
+      "Parameters": {
+        "ProfileRequestData": {
+          "IdentifierName": "_email",
+          "IdentifierValue": "$.Attributes.email"
+        },
+        "ProfileResponseData": []
+      },
+      "Transitions": {
+        "NextAction": "set-customer-id",
+        "Conditions": [],
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "create-assistant-session"
+          },
+          {
+            "ErrorType": "NoneFoundError",
+            "NextAction": "create-profile-email"
+          },
+          {
+            "ErrorType": "MultipleFoundError",
+            "NextAction": "create-assistant-session"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "create-profile-phone",
+      "Type": "CreateCustomerProfile",
+      "Parameters": {
+        "ProfileRequestData": {
+          "PhoneNumber": "$.CustomerEndpoint.Address",
+          "FirstName": "Resident"
+        }
+      },
+      "Transitions": {
+        "NextAction": "set-customer-id",
+        "Conditions": [],
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "create-assistant-session"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "create-profile-email",
+      "Type": "CreateCustomerProfile",
+      "Parameters": {
+        "ProfileRequestData": {
+          "EmailAddress": "$.Attributes.email",
+          "FirstName": "Resident"
+        }
+      },
+      "Transitions": {
+        "NextAction": "set-customer-id",
+        "Conditions": [],
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "create-assistant-session"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "set-customer-id",
+      "Type": "UpdateContactAttributes",
+      "Parameters": {
+        "Attributes": {
+          "customerId": "$.Customer.ProfileId"
+        },
+        "TargetContact": "Current"
+      },
+      "Transitions": {
+        "NextAction": "create-assistant-session",
+        "Conditions": [],
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "create-assistant-session"
+          }
+        ]
       }
     },
     {
@@ -340,13 +317,13 @@
       },
       "Transitions": {
         "NextAction": "select-orchestrator",
+        "Conditions": [],
         "Errors": [
           {
             "ErrorType": "NoMatchingError",
             "NextAction": "play-goodbye"
           }
-        ],
-        "Conditions": []
+        ]
       }
     },
     {
@@ -356,18 +333,19 @@
         "LambdaFunctionARN": "orchestrator",
         "InvocationTimeLimitSeconds": "8",
         "LambdaInvocationAttributes": {
-          "sessionArn": "$.Wisdom.SessionArn"
+          "sessionArn": "$.Wisdom.SessionArn",
+          "customerId": "$.Attributes.customerId"
         }
       },
       "Transitions": {
         "NextAction": "ask-en-question",
+        "Conditions": [],
         "Errors": [
           {
             "ErrorType": "NoMatchingError",
             "NextAction": "ask-en-question"
           }
-        ],
-        "Conditions": []
+        ]
       }
     },
     {
@@ -384,6 +362,7 @@
       },
       "Transitions": {
         "NextAction": "check-hours",
+        "Conditions": [],
         "Errors": [
           {
             "ErrorType": "InputTimeLimitExceeded",
@@ -397,8 +376,7 @@
             "ErrorType": "NoMatchingError",
             "NextAction": "check-hours"
           }
-        ],
-        "Conditions": []
+        ]
       }
     },
     {
@@ -451,13 +429,13 @@
       },
       "Transitions": {
         "NextAction": "check-hours",
+        "Conditions": [],
         "Errors": [
           {
             "ErrorType": "NoMatchingError",
             "NextAction": "check-hours"
           }
-        ],
-        "Conditions": []
+        ]
       }
     },
     {
@@ -479,7 +457,7 @@
             }
           },
           {
-            "NextAction": "check-case-title",
+            "NextAction": "check-ticket-subject",
             "Condition": {
               "Operator": "Equals",
               "Operands": [
@@ -491,7 +469,7 @@
         "Errors": [
           {
             "ErrorType": "NoMatchingError",
-            "NextAction": "check-case-title"
+            "NextAction": "check-ticket-subject"
           }
         ]
       }
@@ -506,13 +484,13 @@
       },
       "Transitions": {
         "NextAction": "set-working-queue",
+        "Conditions": [],
         "Errors": [
           {
             "ErrorType": "NoMatchingError",
             "NextAction": "play-goodbye"
           }
-        ],
-        "Conditions": []
+        ]
       }
     },
     {
@@ -523,13 +501,13 @@
       },
       "Transitions": {
         "NextAction": "set-customer-queue",
+        "Conditions": [],
         "Errors": [
           {
             "ErrorType": "NoMatchingError",
             "NextAction": "play-goodbye"
           }
-        ],
-        "Conditions": []
+        ]
       }
     },
     {
@@ -542,13 +520,13 @@
       },
       "Transitions": {
         "NextAction": "transfer-to-queue",
+        "Conditions": [],
         "Errors": [
           {
             "ErrorType": "NoMatchingError",
             "NextAction": "transfer-to-queue"
           }
-        ],
-        "Conditions": []
+        ]
       }
     },
     {
@@ -557,6 +535,7 @@
       "Parameters": {},
       "Transitions": {
         "NextAction": "play-goodbye",
+        "Conditions": [],
         "Errors": [
           {
             "ErrorType": "QueueAtCapacity",
@@ -566,21 +545,20 @@
             "ErrorType": "NoMatchingError",
             "NextAction": "play-goodbye"
           }
-        ],
-        "Conditions": []
+        ]
       }
     },
     {
-      "Identifier": "check-case-title",
+      "Identifier": "check-ticket-subject",
       "Type": "Compare",
       "Parameters": {
         "ComparisonValue": "$.Attributes.customerIntent"
       },
       "Transitions": {
-        "NextAction": "set-fallback-title",
+        "NextAction": "set-fallback-subject",
         "Conditions": [
           {
-            "NextAction": "set-case-title",
+            "NextAction": "set-ticket-subject",
             "Condition": {
               "Operator": "Exists",
               "Operands": []
@@ -590,269 +568,127 @@
         "Errors": [
           {
             "ErrorType": "NoMatchingCondition",
-            "NextAction": "set-fallback-title"
+            "NextAction": "set-fallback-subject"
           }
         ]
       }
     },
     {
-      "Identifier": "set-case-title",
+      "Identifier": "set-ticket-subject",
       "Type": "UpdateContactAttributes",
       "Parameters": {
         "Attributes": {
-          "caseTitle": "$.Attributes.customerIntent"
+          "ticketSubject": "$.Attributes.customerIntent"
         },
         "TargetContact": "Current"
       },
       "Transitions": {
-        "NextAction": "create-case",
+        "NextAction": "check-customer-id",
+        "Conditions": [],
         "Errors": [
           {
             "ErrorType": "NoMatchingError",
-            "NextAction": "set-fallback-title"
+            "NextAction": "set-fallback-subject"
           }
-        ],
-        "Conditions": []
-      }
-    },
-    {
-      "Identifier": "set-fallback-title",
-      "Type": "UpdateContactAttributes",
-      "Parameters": {
-        "Attributes": {
-          "caseTitle": "After-hours escalation"
-        },
-        "TargetContact": "Current"
-      },
-      "Transitions": {
-        "NextAction": "create-case",
-        "Errors": [
-          {
-            "ErrorType": "NoMatchingError",
-            "NextAction": "play-closed"
-          }
-        ],
-        "Conditions": []
-      }
-    },
-    {
-      "Identifier": "create-case",
-      "Type": "CreateCase",
-      "Parameters": {
-        "LinkContactToCase": "true",
-        "CaseTemplateId": "template",
-        "CaseRequestFields": {
-          "title": "$.Attributes.caseTitle",
-          "summary": "$.Attributes.escalationSummary",
-          "case_reason": "$.Attributes.escalationReason",
-          "137be1e8-7eac-4741-9a3b-18aedbdcf77b": "other",
-          "status": "open"
-        }
-      },
-      "Transitions": {
-        "NextAction": "get-case",
-        "Errors": [
-          {
-            "ErrorType": "ContactNotLinked",
-            "NextAction": "get-case"
-          },
-          {
-            "ErrorType": "NoMatchingError",
-            "NextAction": "create-case-other"
-          }
-        ],
-        "Conditions": []
-      }
-    },
-    {
-      "Identifier": "create-case-other",
-      "Type": "CreateCase",
-      "Parameters": {
-        "LinkContactToCase": "true",
-        "CaseTemplateId": "template",
-        "CaseRequestFields": {
-          "title": "$.Attributes.caseTitle",
-          "summary": "$.Attributes.escalationSummary",
-          "case_reason": "other",
-          "137be1e8-7eac-4741-9a3b-18aedbdcf77b": "other",
-          "status": "open"
-        }
-      },
-      "Transitions": {
-        "NextAction": "get-case",
-        "Errors": [
-          {
-            "ErrorType": "ContactNotLinked",
-            "NextAction": "get-case"
-          },
-          {
-            "ErrorType": "NoMatchingError",
-            "NextAction": "play-closed"
-          }
-        ],
-        "Conditions": []
-      }
-    },
-    {
-      "Identifier": "get-case",
-      "Type": "GetCase",
-      "Parameters": {
-        "LinkContactToCase": "false",
-        "GetLastUpdatedCase": "true",
-        "CaseRequestFields": {
-          "case_id": "$.Case.case_id"
-        },
-        "CaseResponseFields": [
-          "reference_number"
         ]
-      },
-      "Transitions": {
-        "NextAction": "lookup-after-hours-case",
-        "Errors": [
-          {
-            "ErrorType": "NoMatchingError",
-            "NextAction": "branch-case-hold"
-          },
-          {
-            "ErrorType": "NoneFound",
-            "NextAction": "branch-case-hold"
-          },
-          {
-            "ErrorType": "MultipleFound",
-            "NextAction": "branch-case-hold"
-          }
-        ],
-        "Conditions": []
       }
     },
     {
-      "Identifier": "branch-case-hold",
+      "Identifier": "set-fallback-subject",
+      "Type": "UpdateContactAttributes",
+      "Parameters": {
+        "Attributes": {
+          "ticketSubject": "After-hours request"
+        },
+        "TargetContact": "Current"
+      },
+      "Transitions": {
+        "NextAction": "check-customer-id",
+        "Conditions": [],
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "play-closed"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "check-customer-id",
       "Type": "Compare",
       "Parameters": {
-        "ComparisonValue": "$.Channel"
+        "ComparisonValue": "$.Attributes.customerId"
       },
       "Transitions": {
-        "NextAction": "play-case-hold-voice",
+        "NextAction": "play-closed",
         "Conditions": [
           {
-            "NextAction": "play-case-hold-chat",
+            "NextAction": "create-ticket",
             "Condition": {
-              "Operator": "Equals",
-              "Operands": [
-                "CHAT"
-              ]
+              "Operator": "Exists",
+              "Operands": []
             }
           }
         ],
         "Errors": [
           {
             "ErrorType": "NoMatchingCondition",
-            "NextAction": "play-case-hold-voice"
+            "NextAction": "play-closed"
           }
         ]
       }
     },
     {
-      "Identifier": "play-case-hold-chat",
-      "Type": "MessageParticipant",
+      "Identifier": "create-ticket",
+      "Type": "InvokeLambdaFunction",
       "Parameters": {
-        "Text": "One moment while we log your request."
+        "LambdaFunctionARN": "ticket-lambda",
+        "InvocationTimeLimitSeconds": "8"
       },
       "Transitions": {
-        "NextAction": "wait-case",
+        "NextAction": "check-ticket-id",
+        "Conditions": [],
         "Errors": [
           {
             "ErrorType": "NoMatchingError",
-            "NextAction": "wait-case"
+            "NextAction": "play-closed"
           }
-        ],
-        "Conditions": []
+        ]
       }
     },
     {
-      "Identifier": "wait-case",
-      "Type": "Wait",
+      "Identifier": "check-ticket-id",
+      "Type": "Compare",
       "Parameters": {
-        "TimeLimitSeconds": "3"
+        "ComparisonValue": "$.External.ticketId"
       },
       "Transitions": {
-        "NextAction": "get-case-retry",
+        "NextAction": "play-closed",
         "Conditions": [
           {
-            "NextAction": "get-case-retry",
+            "NextAction": "lookup-after-hours-ticket",
             "Condition": {
-              "Operator": "Equals",
-              "Operands": [
-                "WaitCompleted"
-              ]
+              "Operator": "Exists",
+              "Operands": []
             }
           }
         ],
         "Errors": [
           {
-            "ErrorType": "NoMatchingError",
-            "NextAction": "get-case-retry"
+            "ErrorType": "NoMatchingCondition",
+            "NextAction": "play-closed"
           }
         ]
       }
     },
     {
-      "Identifier": "play-case-hold-voice",
-      "Type": "MessageParticipant",
-      "Parameters": {
-        "SSML": "<speak>One moment while we log your request.<break time=\"2s\"/></speak>"
-      },
-      "Transitions": {
-        "NextAction": "get-case-retry",
-        "Errors": [
-          {
-            "ErrorType": "NoMatchingError",
-            "NextAction": "get-case-retry"
-          }
-        ],
-        "Conditions": []
-      }
-    },
-    {
-      "Identifier": "get-case-retry",
-      "Type": "GetCase",
-      "Parameters": {
-        "LinkContactToCase": "false",
-        "GetLastUpdatedCase": "true",
-        "CaseRequestFields": {
-          "case_id": "$.Case.case_id"
-        },
-        "CaseResponseFields": [
-          "reference_number"
-        ]
-      },
-      "Transitions": {
-        "NextAction": "lookup-after-hours-case",
-        "Errors": [
-          {
-            "ErrorType": "NoMatchingError",
-            "NextAction": "play-closed"
-          },
-          {
-            "ErrorType": "NoneFound",
-            "NextAction": "play-closed"
-          },
-          {
-            "ErrorType": "MultipleFound",
-            "NextAction": "play-closed"
-          }
-        ],
-        "Conditions": []
-      }
-    },
-    {
-      "Identifier": "lookup-after-hours-case",
+      "Identifier": "lookup-after-hours-ticket",
       "Type": "EvaluateDataTableValues",
       "Parameters": {
         "DataTableId": "table",
         "Queries": [
           {
-            "QueryName": "AfterHoursCase",
+            "QueryName": "AfterHoursTicket",
             "Attributes": [
               "Text",
               "TextAfter"
@@ -860,7 +696,7 @@
             "PrimaryValues": [
               {
                 "AttributeName": "Prompt",
-                "Value": "AfterHoursCase"
+                "Value": "AfterHoursTicket"
               },
               {
                 "AttributeName": "Channel",
@@ -871,27 +707,27 @@
         ]
       },
       "Transitions": {
-        "NextAction": "check-case-prompt",
+        "NextAction": "check-ticket-prompt",
+        "Conditions": [],
         "Errors": [
           {
             "ErrorType": "NoMatchingError",
             "NextAction": "play-closed"
           }
-        ],
-        "Conditions": []
+        ]
       }
     },
     {
-      "Identifier": "check-case-prompt",
+      "Identifier": "check-ticket-prompt",
       "Type": "Compare",
       "Parameters": {
-        "ComparisonValue": "$.DataTables.AfterHoursCase.Text"
+        "ComparisonValue": "$.DataTables.AfterHoursTicket.Text"
       },
       "Transitions": {
         "NextAction": "play-closed",
         "Conditions": [
           {
-            "NextAction": "check-reference",
+            "NextAction": "branch-ticket-channel",
             "Condition": {
               "Operator": "Exists",
               "Operands": []
@@ -907,41 +743,16 @@
       }
     },
     {
-      "Identifier": "check-reference",
-      "Type": "Compare",
-      "Parameters": {
-        "ComparisonValue": "$.Case.reference_number"
-      },
-      "Transitions": {
-        "NextAction": "play-closed",
-        "Conditions": [
-          {
-            "NextAction": "branch-case-channel",
-            "Condition": {
-              "Operator": "Exists",
-              "Operands": []
-            }
-          }
-        ],
-        "Errors": [
-          {
-            "ErrorType": "NoMatchingCondition",
-            "NextAction": "play-closed"
-          }
-        ]
-      }
-    },
-    {
-      "Identifier": "branch-case-channel",
+      "Identifier": "branch-ticket-channel",
       "Type": "Compare",
       "Parameters": {
         "ComparisonValue": "$.Channel"
       },
       "Transitions": {
-        "NextAction": "play-case-voice",
+        "NextAction": "play-ticket-voice",
         "Conditions": [
           {
-            "NextAction": "play-case-chat",
+            "NextAction": "play-ticket-chat",
             "Condition": {
               "Operator": "Equals",
               "Operands": [
@@ -953,43 +764,43 @@
         "Errors": [
           {
             "ErrorType": "NoMatchingCondition",
-            "NextAction": "play-case-voice"
+            "NextAction": "play-ticket-voice"
           }
         ]
       }
     },
     {
-      "Identifier": "play-case-chat",
+      "Identifier": "play-ticket-chat",
       "Type": "MessageParticipant",
       "Parameters": {
-        "Text": "$.DataTables.AfterHoursCase.Text $.Case.reference_number. $.DataTables.AfterHoursCase.TextAfter"
+        "Text": "$.DataTables.AfterHoursTicket.Text $.External.ticketId. $.DataTables.AfterHoursTicket.TextAfter"
       },
       "Transitions": {
         "NextAction": "disconnect",
+        "Conditions": [],
         "Errors": [
           {
             "ErrorType": "NoMatchingError",
             "NextAction": "play-closed"
           }
-        ],
-        "Conditions": []
+        ]
       }
     },
     {
-      "Identifier": "play-case-voice",
+      "Identifier": "play-ticket-voice",
       "Type": "MessageParticipant",
       "Parameters": {
-        "SSML": "<speak>$.DataTables.AfterHoursCase.Text <say-as interpret-as=\"digits\">$.Case.reference_number</say-as>. $.DataTables.AfterHoursCase.TextAfter</speak>"
+        "SSML": "<speak>$.DataTables.AfterHoursTicket.Text <say-as interpret-as=\"characters\">$.External.ticketId</say-as>. $.DataTables.AfterHoursTicket.TextAfter</speak>"
       },
       "Transitions": {
         "NextAction": "disconnect",
+        "Conditions": [],
         "Errors": [
           {
             "ErrorType": "NoMatchingError",
             "NextAction": "play-closed"
           }
-        ],
-        "Conditions": []
+        ]
       }
     },
     {
@@ -1000,13 +811,13 @@
       },
       "Transitions": {
         "NextAction": "disconnect",
+        "Conditions": [],
         "Errors": [
           {
             "ErrorType": "NoMatchingError",
             "NextAction": "disconnect"
           }
-        ],
-        "Conditions": []
+        ]
       }
     },
     {
@@ -1017,13 +828,13 @@
       },
       "Transitions": {
         "NextAction": "disconnect",
+        "Conditions": [],
         "Errors": [
           {
             "ErrorType": "NoMatchingError",
             "NextAction": "disconnect"
           }
-        ],
-        "Conditions": []
+        ]
       }
     },
     {
@@ -1034,13 +845,13 @@
       },
       "Transitions": {
         "NextAction": "disconnect",
+        "Conditions": [],
         "Errors": [
           {
             "ErrorType": "NoMatchingError",
             "NextAction": "disconnect"
           }
-        ],
-        "Conditions": []
+        ]
       }
     },
     {
@@ -1049,5 +860,6 @@
       "Parameters": {},
       "Transitions": {}
     }
-  ]
+  ],
+  "Metadata": {}
 }

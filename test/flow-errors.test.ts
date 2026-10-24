@@ -20,8 +20,8 @@ const allowedErrors: Record<string, readonly string[]> = {
   ShowView: ['NoMatchingError', 'NoMatchingCondition', 'TimeLimitExceeded'],
   Wait: ['NoMatchingError'],
   MessageParticipantIteratively: ['NoMatchingError'],
-  CreateCase: ['ContactNotLinked', 'NoMatchingError'],
-  GetCase: ['NoMatchingError', 'NoneFound', 'MultipleFound', 'ContactNotLinked'],
+  GetCustomerProfile: ['NoMatchingError', 'NoneFoundError', 'MultipleFoundError'],
+  CreateCustomerProfile: ['NoMatchingError'],
 };
 
 const flowProps = {
@@ -33,8 +33,7 @@ const flowProps = {
   queueArn: 'queue',
   escalationGuideFlowArn: 'escalation-guide',
   customerQueueFlowArn: 'queue-flow',
-  caseTemplateId: 'template',
-  requestCategoryFieldId: '137be1e8-7eac-4741-9a3b-18aedbdcf77b',
+  ticketLambdaArn: 'ticket-lambda',
 };
 
 const queueProps = { dataTableId: 'table', holdMusicPromptArn: 'hold-music' };
@@ -162,7 +161,7 @@ test('main flow looks up prompt text by channel and plays the greeting on succes
   expect(JSON.stringify(flow)).not.toContain('LanguageCode');
   expect(block('enable-flow-logging').Transitions.NextAction).toBe('set-en-voice');
   expect(block('play-greeting').Transitions).toMatchObject({
-    NextAction: 'create-assistant-session',
+    NextAction: 'branch-identity',
     Errors: [{ ErrorType: 'NoMatchingError', NextAction: 'play-fallback' }],
   });
   expect(block('play-greeting').Parameters.Text).toBe('$.DataTables.Greeting.Text');
@@ -206,7 +205,7 @@ test('in-hours escalation sets the agent guide before transferring to the queue'
   expect(block('check-hours').Parameters.HoursOfOperationId).toBe('hours');
   expect(block('check-hours').Transitions.NextAction).toBe('set-event-flow');
   expect(next('check-hours', 'True')).toBe('set-event-flow');
-  expect(next('check-hours', 'False')).toBe('check-case-title');
+  expect(next('check-hours', 'False')).toBe('check-ticket-subject');
   expect(block('set-escalation').Transitions.NextAction).toBe('check-hours');
   expect(next('check-tool', 'Escalate')).toBe('set-escalation');
   expect(block('set-event-flow')).toMatchObject({
@@ -268,148 +267,122 @@ test('in-hours escalation sets the agent guide before transferring to the queue'
   }
 });
 
-test('after-hours escalation creates a case, speaks the reference, and disconnects', () => {
+test('a chat or phone caller is matched to a profile before the assistant session', () => {
   const flow = mainFlow(flowProps).content;
   const block = (identifier: string) => {
     const found = flow.Actions.find((action) => action.Identifier === identifier);
-    if (!found) {
-      throw new Error(`missing ${identifier}`);
-    }
+    if (!found) throw new Error(`missing ${identifier}`);
     return found;
   };
-  const closed = reachable(flow, 'check-case-title');
+
+  expect(block('branch-identity').Parameters.ComparisonValue).toBe('$.Channel');
+  expect(block('branch-identity').Transitions.Conditions?.[0]).toMatchObject({
+    NextAction: 'check-chat-email',
+    Condition: { Operator: 'Equals', Operands: ['CHAT'] },
+  });
+  expect(block('branch-identity').Transitions.NextAction).toBe('check-caller-phone');
+  expect(block('check-chat-email').Parameters.ComparisonValue).toBe('$.Attributes.email');
+  expect(block('check-chat-email').Transitions.NextAction).toBe('create-assistant-session');
+  expect(block('check-caller-phone').Parameters.ComparisonValue).toBe('$.CustomerEndpoint.Address');
+  expect(block('find-profile-email').Parameters.ProfileRequestData).toEqual({
+    IdentifierName: '_email',
+    IdentifierValue: '$.Attributes.email',
+  });
+  expect(block('find-profile-phone').Parameters.ProfileRequestData).toEqual({
+    IdentifierName: '_phone',
+    IdentifierValue: '$.CustomerEndpoint.Address',
+  });
+  expect(block('find-profile-email').Transitions.Errors).toEqual([
+    { ErrorType: 'NoMatchingError', NextAction: 'create-assistant-session' },
+    { ErrorType: 'NoneFoundError', NextAction: 'create-profile-email' },
+    { ErrorType: 'MultipleFoundError', NextAction: 'create-assistant-session' },
+  ]);
+  expect(block('create-profile-email').Parameters.ProfileRequestData).toEqual({
+    EmailAddress: '$.Attributes.email',
+    FirstName: 'Resident',
+  });
+  expect(block('create-profile-phone').Parameters.ProfileRequestData).toEqual({
+    PhoneNumber: '$.CustomerEndpoint.Address',
+    FirstName: 'Resident',
+  });
+  expect(block('create-profile-phone').Transitions.Errors).toEqual([
+    { ErrorType: 'NoMatchingError', NextAction: 'create-assistant-session' },
+  ]);
+  expect(JSON.stringify(block('set-customer-id').Parameters)).toContain('"customerId":"$.Customer.ProfileId"');
+  expect(block('set-customer-id').Transitions.NextAction).toBe('create-assistant-session');
+  expect(block('set-customer-id').Transitions.Errors?.[0].NextAction).toBe('create-assistant-session');
+  expect(JSON.stringify(block('select-orchestrator').Parameters)).toContain('"customerId":"$.Attributes.customerId"');
+});
+
+test('after-hours escalation creates a ticket, speaks the id, and disconnects', () => {
+  const flow = mainFlow(flowProps).content;
+  const block = (identifier: string) => {
+    const found = flow.Actions.find((action) => action.Identifier === identifier);
+    if (!found) throw new Error(`missing ${identifier}`);
+    return found;
+  };
+  const closed = reachable(flow, 'check-ticket-subject');
   const open = reachable(flow, 'set-event-flow');
 
   expect(closed.has('disconnect')).toBe(true);
   expect(closed.has('play-closed')).toBe(true);
-  expect(closed.has('create-case')).toBe(true);
-  expect(closed.has('create-case-other')).toBe(true);
-  expect(closed.has('get-case')).toBe(true);
-  expect(closed.has('get-case-retry')).toBe(true);
-  expect(closed.has('wait-case')).toBe(true);
-  expect(closed.has('play-case-hold-chat')).toBe(true);
-  expect(closed.has('play-case-hold-voice')).toBe(true);
-  expect(closed.has('check-reference')).toBe(true);
-  expect(closed.has('play-case-chat')).toBe(true);
-  expect(closed.has('play-case-voice')).toBe(true);
+  expect(closed.has('create-ticket')).toBe(true);
+  expect(closed.has('play-ticket-chat')).toBe(true);
+  expect(closed.has('play-ticket-voice')).toBe(true);
   expect(closed.has('transfer-to-queue')).toBe(false);
   expect(closed.has('set-event-flow')).toBe(false);
-  expect(open.has('check-case-title')).toBe(false);
-  expect(open.has('create-case')).toBe(false);
-  expect(flow.Actions.some((action) => action.Identifier === 'create-profile')).toBe(false);
+  expect(open.has('check-ticket-subject')).toBe(false);
+  expect(open.has('create-ticket')).toBe(false);
+  expect(flow.Actions.some((action) => action.Type === 'Wait')).toBe(false);
+  expect(JSON.stringify(flow)).not.toContain('CreateCase');
+  expect(JSON.stringify(flow)).not.toContain('GetCase');
 
-  expect(block('create-case').Parameters).toEqual({
-    LinkContactToCase: 'true',
-    CaseTemplateId: 'template',
-    CaseRequestFields: {
-      title: '$.Attributes.caseTitle',
-      summary: '$.Attributes.escalationSummary',
-      case_reason: '$.Attributes.escalationReason',
-      '137be1e8-7eac-4741-9a3b-18aedbdcf77b': 'other',
-      status: 'open',
-    },
+  expect(block('check-ticket-subject').Parameters.ComparisonValue).toBe('$.Attributes.customerIntent');
+  expect(block('check-ticket-subject').Transitions.Conditions?.[0].Condition.Operands).toEqual([]);
+  expect(JSON.stringify(block('set-ticket-subject').Parameters)).toContain('"ticketSubject":"$.Attributes.customerIntent"');
+  expect(JSON.stringify(block('set-fallback-subject').Parameters)).toContain('"ticketSubject":"After-hours request"');
+  expect(block('check-customer-id').Transitions.NextAction).toBe('play-closed');
+  expect(block('check-customer-id').Transitions.Conditions?.[0]).toMatchObject({
+    NextAction: 'create-ticket',
+    Condition: { Operator: 'Exists', Operands: [] },
   });
-  expect(block('create-case').Transitions.Errors).toEqual([
-    { ErrorType: 'ContactNotLinked', NextAction: 'get-case' },
-    { ErrorType: 'NoMatchingError', NextAction: 'create-case-other' },
-  ]);
-  expect(block('create-case-other').Parameters).toEqual({
-    LinkContactToCase: 'true',
-    CaseTemplateId: 'template',
-    CaseRequestFields: {
-      title: '$.Attributes.caseTitle',
-      summary: '$.Attributes.escalationSummary',
-      case_reason: 'other',
-      '137be1e8-7eac-4741-9a3b-18aedbdcf77b': 'other',
-      status: 'open',
-    },
-  });
-  expect(block('create-case-other').Transitions.NextAction).toBe('get-case');
-  expect(block('create-case-other').Transitions.Errors).toEqual([
-    { ErrorType: 'ContactNotLinked', NextAction: 'get-case' },
-    { ErrorType: 'NoMatchingError', NextAction: 'play-closed' },
-  ]);
-  const getCaseParameters = {
-    LinkContactToCase: 'false',
-    GetLastUpdatedCase: 'true',
-    CaseRequestFields: { case_id: '$.Case.case_id' },
-    CaseResponseFields: ['reference_number'],
-  };
-  expect(block('get-case').Parameters).toEqual(getCaseParameters);
-  expect(block('get-case').Transitions.Errors).toEqual([
-    { ErrorType: 'NoMatchingError', NextAction: 'branch-case-hold' },
-    { ErrorType: 'NoneFound', NextAction: 'branch-case-hold' },
-    { ErrorType: 'MultipleFound', NextAction: 'branch-case-hold' },
-  ]);
-  expect(block('branch-case-hold').Transitions.Conditions?.[0]).toMatchObject({
-    NextAction: 'play-case-hold-chat',
-    Condition: { Operator: 'Equals', Operands: ['CHAT'] },
-  });
-  expect(block('branch-case-hold').Transitions.NextAction).toBe('play-case-hold-voice');
-  expect(block('play-case-hold-chat').Parameters).toEqual({
-    Text: 'One moment while we log your request.',
-  });
-  expect(block('play-case-hold-chat').Transitions.NextAction).toBe('wait-case');
-  expect(block('wait-case')).toMatchObject({
-    Type: 'Wait',
-    Parameters: { TimeLimitSeconds: '3' },
+  expect(block('create-ticket')).toMatchObject({
+    Type: 'InvokeLambdaFunction',
+    Parameters: { LambdaFunctionARN: 'ticket-lambda', InvocationTimeLimitSeconds: '8' },
     Transitions: {
-      NextAction: 'get-case-retry',
-      Conditions: [
-        {
-          NextAction: 'get-case-retry',
-          Condition: { Operator: 'Equals', Operands: ['WaitCompleted'] },
-        },
-      ],
+      NextAction: 'check-ticket-id',
+      Errors: [{ ErrorType: 'NoMatchingError', NextAction: 'play-closed' }],
     },
   });
-  expect(block('play-case-hold-voice').Parameters).toEqual({
-    SSML: '<speak>One moment while we log your request.<break time="2s"/></speak>',
-  });
-  expect(block('play-case-hold-voice').Transitions.NextAction).toBe('get-case-retry');
-  expect(reachable(flow, 'play-case-hold-voice').has('wait-case')).toBe(false);
-  expect(block('get-case-retry').Parameters).toEqual(getCaseParameters);
-  expect(block('get-case-retry').Transitions.NextAction).toBe('lookup-after-hours-case');
-  expect(block('get-case-retry').Transitions.Errors).toEqual([
-    { ErrorType: 'NoMatchingError', NextAction: 'play-closed' },
-    { ErrorType: 'NoneFound', NextAction: 'play-closed' },
-    { ErrorType: 'MultipleFound', NextAction: 'play-closed' },
-  ]);
-  expect(block('lookup-after-hours-case').Parameters.Queries).toEqual([{
-    QueryName: 'AfterHoursCase',
+  expect(block('check-ticket-id').Parameters.ComparisonValue).toBe('$.External.ticketId');
+  expect(block('lookup-after-hours-ticket').Parameters.Queries).toEqual([{
+    QueryName: 'AfterHoursTicket',
     Attributes: ['Text', 'TextAfter'],
     PrimaryValues: [
-      { AttributeName: 'Prompt', Value: 'AfterHoursCase' },
+      { AttributeName: 'Prompt', Value: 'AfterHoursTicket' },
       { AttributeName: 'Channel', Value: '$.Channel' },
     ],
   }]);
-  expect(block('check-reference').Parameters.ComparisonValue).toBe('$.Case.reference_number');
-  expect(block('check-reference').Transitions.Conditions?.[0]).toMatchObject({
-    NextAction: 'branch-case-channel',
-    Condition: { Operator: 'Exists', Operands: [] },
-  });
-  expect(block('check-reference').Transitions.NextAction).toBe('play-closed');
-  expect(block('branch-case-channel').Transitions.Conditions?.[0]).toMatchObject({
-    NextAction: 'play-case-chat',
+  expect(block('check-ticket-prompt').Transitions.Conditions?.[0].Condition.Operator).toBe('Exists');
+  expect(block('branch-ticket-channel').Transitions.Conditions?.[0]).toMatchObject({
+    NextAction: 'play-ticket-chat',
     Condition: { Operator: 'Equals', Operands: ['CHAT'] },
   });
-  expect(block('branch-case-channel').Transitions.NextAction).toBe('play-case-voice');
-  expect(block('play-case-chat').Parameters).toEqual({
-    Text: '$.DataTables.AfterHoursCase.Text $.Case.reference_number. $.DataTables.AfterHoursCase.TextAfter',
+  expect(block('branch-ticket-channel').Transitions.NextAction).toBe('play-ticket-voice');
+  expect(block('play-ticket-chat').Parameters).toEqual({
+    Text: '$.DataTables.AfterHoursTicket.Text $.External.ticketId. $.DataTables.AfterHoursTicket.TextAfter',
   });
-  expect(block('play-case-chat').Transitions.NextAction).toBe('disconnect');
-  expect(block('play-case-voice').Parameters).toEqual({
-    SSML: '<speak>$.DataTables.AfterHoursCase.Text <say-as interpret-as="digits">$.Case.reference_number</say-as>. $.DataTables.AfterHoursCase.TextAfter</speak>',
+  expect(block('play-ticket-chat').Transitions.NextAction).toBe('disconnect');
+  expect(block('play-ticket-voice').Parameters).toEqual({
+    SSML: '<speak>$.DataTables.AfterHoursTicket.Text <say-as interpret-as="characters">$.External.ticketId</say-as>. $.DataTables.AfterHoursTicket.TextAfter</speak>',
   });
-  expect(block('play-case-voice').Transitions.NextAction).toBe('disconnect');
-  expect(block('play-case-voice').Transitions.Errors?.[0].NextAction).toBe('play-closed');
+  expect(block('play-ticket-voice').Transitions.NextAction).toBe('disconnect');
+  expect(block('play-ticket-voice').Transitions.Errors?.[0].NextAction).toBe('play-closed');
   expect(block('play-closed').Parameters.Text).toBe(AFTER_HOURS_CLOSED_TEXT);
   expect(block('play-closed').Transitions).toMatchObject({
     NextAction: 'disconnect',
     Errors: [{ ErrorType: 'NoMatchingError', NextAction: 'disconnect' }],
   });
-  expect(block('check-case-title').Transitions.Conditions?.[0].Condition.Operands).toEqual([]);
-  expect(block('check-case-prompt').Transitions.Conditions?.[0].Condition.Operator).toBe('Exists');
   expect(JSON.stringify(flow.Actions)).not.toContain('TransferToFlow');
   expect(JSON.stringify(flow.Actions)).not.toContain('UpdateContactRecordingBehavior');
 });

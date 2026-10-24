@@ -13,8 +13,7 @@ const mainFlowProps: MainFlowProps = {
   queueArn: 'queue',
   escalationGuideFlowArn: 'escalation-guide',
   customerQueueFlowArn: 'queue-flow',
-  caseTemplateId: 'template',
-  requestCategoryFieldId: 'category',
+  ticketLambdaArn: 'ticket-lambda',
 };
 
 export interface FlowPage {

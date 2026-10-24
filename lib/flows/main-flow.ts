@@ -3,14 +3,14 @@ import {
   checkHoursOfOperation,
   compare,
   connectParticipantWithLexBot,
-  createCase,
+  createCustomerProfile,
   createWisdomSession,
   disconnectParticipant,
   equals,
   evaluateDataTableValues,
   exists,
   flow,
-  getCase,
+  getCustomerProfile,
   invokeLambdaFunction,
   messageParticipant,
   transferContactToQueue,
@@ -19,7 +19,6 @@ import {
   updateContactTargetQueue,
   updateContactTextToSpeechVoice,
   updateFlowLoggingBehavior,
-  wait,
   type CompiledFlow,
   type DataTableQuery,
 } from '../flow';
@@ -33,8 +32,7 @@ export interface MainFlowProps {
   queueArn: string;
   escalationGuideFlowArn: string;
   customerQueueFlowArn: string;
-  caseTemplateId: string;
-  requestCategoryFieldId: string;
+  ticketLambdaArn: string;
 }
 
 export const MAIN_FLOW_NAME = 'HarborRidge311-Main';
@@ -42,19 +40,17 @@ export const MAIN_FLOW_NAME = 'HarborRidge311-Main';
 const VOICE_GREETING = 'Thank you for calling Harbor Ridge 3 1 1. This line is a demo.';
 const VOICE_GOODBYE = 'Thank you for calling Harbor Ridge 3 1 1. Goodbye.';
 
-export const AFTER_HOURS_CASE_CHAT_TEXT = "Harbor Ridge 311 is closed right now, so we've logged your request. Your reference number is";
-export const AFTER_HOURS_CASE_VOICE_TEXT = 'Harbor Ridge 3 1 1 is closed right now, so we have logged your request. Your reference number is';
-export const AFTER_HOURS_CASE_TEXT_AFTER = 'Our team works Monday to Friday, 8 a.m. to 5 p.m. Pacific and will follow up then.';
+export const AFTER_HOURS_TICKET_CHAT_TEXT = "Harbor Ridge 311 is closed right now, so we've logged your request. Your request number is";
+export const AFTER_HOURS_TICKET_VOICE_TEXT = 'Harbor Ridge 3 1 1 is closed right now, so we have logged your request. Your request number is';
+export const AFTER_HOURS_TICKET_TEXT_AFTER = 'Our team works Monday to Friday, 8 a.m. to 5 p.m. Pacific and will follow up then.';
 export const AFTER_HOURS_CLOSED_TEXT = 'Harbor Ridge 311 is closed right now. Our team is available Monday to Friday, 8 a.m. to 5 p.m. Pacific.';
-const CASE_REFERENCE_ATTRIBUTE = '$.Case.reference_number';
-const AFTER_HOURS_CASE_PLAY_TEXT = `$.DataTables.AfterHoursCase.Text ${CASE_REFERENCE_ATTRIBUTE}. $.DataTables.AfterHoursCase.TextAfter`;
-const AFTER_HOURS_CASE_VOICE_SSML = `<speak>$.DataTables.AfterHoursCase.Text <say-as interpret-as="digits">${CASE_REFERENCE_ATTRIBUTE}</say-as>. $.DataTables.AfterHoursCase.TextAfter</speak>`;
-const CASE_HOLD_TEXT = 'One moment while we log your request.';
-const CASE_HOLD_VOICE_SSML = `<speak>${CASE_HOLD_TEXT}<break time="2s"/></speak>`;
-const FALLBACK_CASE_TITLE = 'After-hours escalation';
+const TICKET_ID_ATTRIBUTE = '$.External.ticketId';
+const AFTER_HOURS_TICKET_PLAY_TEXT = `$.DataTables.AfterHoursTicket.Text ${TICKET_ID_ATTRIBUTE}. $.DataTables.AfterHoursTicket.TextAfter`;
+const AFTER_HOURS_TICKET_VOICE_SSML = `<speak>$.DataTables.AfterHoursTicket.Text <say-as interpret-as="characters">${TICKET_ID_ATTRIBUTE}</say-as>. $.DataTables.AfterHoursTicket.TextAfter</speak>`;
+const FALLBACK_TICKET_SUBJECT = 'After-hours request';
 
 function promptQuery(
-  prompt: 'Greeting' | 'Goodbye' | 'Question' | 'AfterHoursCase',
+  prompt: 'Greeting' | 'Goodbye' | 'Question' | 'AfterHoursTicket',
   attributes: string[] = ['Text'],
 ): DataTableQuery {
   return {
@@ -67,24 +63,29 @@ function promptQuery(
   };
 }
 
-const getCaseParameters = {
-  LinkContactToCase: 'false',
-  GetLastUpdatedCase: 'true',
-  CaseRequestFields: {
-    case_id: '$.Case.case_id',
-  },
-  CaseResponseFields: ['reference_number'],
-} as const;
-
-export function mainFlow(props: MainFlowProps): CompiledFlow<typeof CONTACT_FLOW> {
-  const caseFields = (caseReason: string) => ({
-    title: '$.Attributes.caseTitle',
-    summary: '$.Attributes.escalationSummary',
-    case_reason: caseReason,
-    [props.requestCategoryFieldId]: 'other',
-    status: 'open',
+function profileLookup(
+  key: string,
+  identifierName: string,
+  identifierValue: string,
+  found: string,
+  missing: string,
+  skip: string,
+) {
+  return getCustomerProfile(key, {
+    ProfileRequestData: {
+      IdentifierName: identifierName,
+      IdentifierValue: identifierValue,
+    },
+    ProfileResponseData: [],
+  }, {
+    next: found,
+    error: skip,
+    noneFound: missing,
+    multipleFound: skip,
   });
+}
 
+export function mainFlow(props: MainFlowProps): CompiledFlow {
   return flow({
     name: MAIN_FLOW_NAME,
     type: CONTACT_FLOW,
@@ -107,7 +108,60 @@ export function mainFlow(props: MainFlowProps): CompiledFlow<typeof CONTACT_FLOW
       }, { next: 'play-greeting', error: 'play-fallback' }),
       messageParticipant('play-greeting', {
         Text: '$.DataTables.Greeting.Text',
-      }, { next: 'create-assistant-session', error: 'play-fallback' }),
+      }, { next: 'branch-identity', error: 'play-fallback' }),
+      compare('branch-identity', {
+        ComparisonValue: '$.Channel',
+      }, {
+        next: 'check-caller-phone',
+        conditions: [equals('CHAT', 'check-chat-email')],
+        noMatch: 'check-caller-phone',
+      }),
+      compare('check-chat-email', {
+        ComparisonValue: '$.Attributes.email',
+      }, {
+        next: 'create-assistant-session',
+        conditions: [exists('find-profile-email')],
+        noMatch: 'create-assistant-session',
+      }),
+      compare('check-caller-phone', {
+        ComparisonValue: '$.CustomerEndpoint.Address',
+      }, {
+        next: 'create-assistant-session',
+        conditions: [exists('find-profile-phone')],
+        noMatch: 'create-assistant-session',
+      }),
+      profileLookup(
+        'find-profile-phone',
+        '_phone',
+        '$.CustomerEndpoint.Address',
+        'set-customer-id',
+        'create-profile-phone',
+        'create-assistant-session',
+      ),
+      profileLookup(
+        'find-profile-email',
+        '_email',
+        '$.Attributes.email',
+        'set-customer-id',
+        'create-profile-email',
+        'create-assistant-session',
+      ),
+      createCustomerProfile('create-profile-phone', {
+        ProfileRequestData: {
+          PhoneNumber: '$.CustomerEndpoint.Address',
+          FirstName: 'Resident',
+        },
+      }, { next: 'set-customer-id', error: 'create-assistant-session' }),
+      createCustomerProfile('create-profile-email', {
+        ProfileRequestData: {
+          EmailAddress: '$.Attributes.email',
+          FirstName: 'Resident',
+        },
+      }, { next: 'set-customer-id', error: 'create-assistant-session' }),
+      updateContactAttributes('set-customer-id', {
+        Attributes: { customerId: '$.Customer.ProfileId' },
+        TargetContact: 'Current',
+      }, { next: 'create-assistant-session', error: 'create-assistant-session' }),
       createWisdomSession('create-assistant-session', {
         WisdomAssistantArn: props.wisdomAssistantArn,
       }, { next: 'select-orchestrator', error: 'play-goodbye' }),
@@ -116,6 +170,7 @@ export function mainFlow(props: MainFlowProps): CompiledFlow<typeof CONTACT_FLOW
         InvocationTimeLimitSeconds: '8',
         LambdaInvocationAttributes: {
           sessionArn: '$.Wisdom.SessionArn',
+          customerId: '$.Attributes.customerId',
         },
       }, { next: 'ask-en-question', error: 'ask-en-question' }),
       connectParticipantWithLexBot('ask-en-question', {
@@ -156,8 +211,8 @@ export function mainFlow(props: MainFlowProps): CompiledFlow<typeof CONTACT_FLOW
       }, {
         next: 'set-event-flow',
         inHours: 'set-event-flow',
-        outOfHours: 'check-case-title',
-        error: 'check-case-title',
+        outOfHours: 'check-ticket-subject',
+        error: 'check-ticket-subject',
       }),
       updateContactEventHooks('set-event-flow', {
         EventHooks: {
@@ -177,93 +232,62 @@ export function mainFlow(props: MainFlowProps): CompiledFlow<typeof CONTACT_FLOW
         atCapacity: 'play-goodbye',
         error: 'play-goodbye',
       }),
-      compare('check-case-title', {
+      compare('check-ticket-subject', {
         ComparisonValue: '$.Attributes.customerIntent',
       }, {
-        next: 'set-fallback-title',
-        conditions: [exists('set-case-title')],
-        noMatch: 'set-fallback-title',
+        next: 'set-fallback-subject',
+        conditions: [exists('set-ticket-subject')],
+        noMatch: 'set-fallback-subject',
       }),
-      updateContactAttributes('set-case-title', {
-        Attributes: {
-          caseTitle: '$.Attributes.customerIntent',
-        },
+      updateContactAttributes('set-ticket-subject', {
+        Attributes: { ticketSubject: '$.Attributes.customerIntent' },
         TargetContact: 'Current',
-      }, { next: 'create-case', error: 'set-fallback-title' }),
-      updateContactAttributes('set-fallback-title', {
-        Attributes: {
-          caseTitle: FALLBACK_CASE_TITLE,
-        },
+      }, { next: 'check-customer-id', error: 'set-fallback-subject' }),
+      updateContactAttributes('set-fallback-subject', {
+        Attributes: { ticketSubject: FALLBACK_TICKET_SUBJECT },
         TargetContact: 'Current',
-      }, { next: 'create-case', error: 'play-closed' }),
-      createCase('create-case', {
-        LinkContactToCase: 'true',
-        CaseTemplateId: props.caseTemplateId,
-        CaseRequestFields: caseFields('$.Attributes.escalationReason'),
-      }, { next: 'get-case', notLinked: 'get-case', error: 'create-case-other' }),
-      createCase('create-case-other', {
-        LinkContactToCase: 'true',
-        CaseTemplateId: props.caseTemplateId,
-        CaseRequestFields: caseFields('other'),
-      }, { next: 'get-case', notLinked: 'get-case', error: 'play-closed' }),
-      getCase('get-case', getCaseParameters, {
-        next: 'lookup-after-hours-case',
-        error: 'branch-case-hold',
-        noneFound: 'branch-case-hold',
-        multipleFound: 'branch-case-hold',
-      }),
-      compare('branch-case-hold', {
-        ComparisonValue: '$.Channel',
+      }, { next: 'check-customer-id', error: 'play-closed' }),
+      compare('check-customer-id', {
+        ComparisonValue: '$.Attributes.customerId',
       }, {
-        next: 'play-case-hold-voice',
-        conditions: [equals('CHAT', 'play-case-hold-chat')],
-        noMatch: 'play-case-hold-voice',
+        next: 'play-closed',
+        conditions: [exists('create-ticket')],
+        noMatch: 'play-closed',
       }),
-      messageParticipant('play-case-hold-chat', {
-        Text: CASE_HOLD_TEXT,
-      }, { next: 'wait-case', error: 'wait-case' }),
-      wait('wait-case', {
-        TimeLimitSeconds: '3',
-      }, { next: 'get-case-retry', completed: 'get-case-retry', error: 'get-case-retry' }),
-      messageParticipant('play-case-hold-voice', {
-        SSML: CASE_HOLD_VOICE_SSML,
-      }, { next: 'get-case-retry', error: 'get-case-retry' }),
-      getCase('get-case-retry', getCaseParameters, {
-        next: 'lookup-after-hours-case',
-        error: 'play-closed',
-        noneFound: 'play-closed',
-        multipleFound: 'play-closed',
+      invokeLambdaFunction('create-ticket', {
+        LambdaFunctionARN: props.ticketLambdaArn,
+        InvocationTimeLimitSeconds: '8',
+      }, { next: 'check-ticket-id', error: 'play-closed' }),
+      compare('check-ticket-id', {
+        ComparisonValue: TICKET_ID_ATTRIBUTE,
+      }, {
+        next: 'play-closed',
+        conditions: [exists('lookup-after-hours-ticket')],
+        noMatch: 'play-closed',
       }),
-      evaluateDataTableValues('lookup-after-hours-case', {
+      evaluateDataTableValues('lookup-after-hours-ticket', {
         DataTableId: props.dataTableId,
-        Queries: [promptQuery('AfterHoursCase', ['Text', 'TextAfter'])],
-      }, { next: 'check-case-prompt', error: 'play-closed' }),
-      compare('check-case-prompt', {
-        ComparisonValue: '$.DataTables.AfterHoursCase.Text',
+        Queries: [promptQuery('AfterHoursTicket', ['Text', 'TextAfter'])],
+      }, { next: 'check-ticket-prompt', error: 'play-closed' }),
+      compare('check-ticket-prompt', {
+        ComparisonValue: '$.DataTables.AfterHoursTicket.Text',
       }, {
         next: 'play-closed',
-        conditions: [exists('check-reference')],
+        conditions: [exists('branch-ticket-channel')],
         noMatch: 'play-closed',
       }),
-      compare('check-reference', {
-        ComparisonValue: CASE_REFERENCE_ATTRIBUTE,
-      }, {
-        next: 'play-closed',
-        conditions: [exists('branch-case-channel')],
-        noMatch: 'play-closed',
-      }),
-      compare('branch-case-channel', {
+      compare('branch-ticket-channel', {
         ComparisonValue: '$.Channel',
       }, {
-        next: 'play-case-voice',
-        conditions: [equals('CHAT', 'play-case-chat')],
-        noMatch: 'play-case-voice',
+        next: 'play-ticket-voice',
+        conditions: [equals('CHAT', 'play-ticket-chat')],
+        noMatch: 'play-ticket-voice',
       }),
-      messageParticipant('play-case-chat', {
-        Text: AFTER_HOURS_CASE_PLAY_TEXT,
+      messageParticipant('play-ticket-chat', {
+        Text: AFTER_HOURS_TICKET_PLAY_TEXT,
       }, { next: 'disconnect', error: 'play-closed' }),
-      messageParticipant('play-case-voice', {
-        SSML: AFTER_HOURS_CASE_VOICE_SSML,
+      messageParticipant('play-ticket-voice', {
+        SSML: AFTER_HOURS_TICKET_VOICE_SSML,
       }, { next: 'disconnect', error: 'play-closed' }),
       messageParticipant('play-closed', {
         Text: AFTER_HOURS_CLOSED_TEXT,

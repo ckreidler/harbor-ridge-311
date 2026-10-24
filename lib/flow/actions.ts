@@ -15,8 +15,8 @@ export type ActionType =
   | 'UpdateContactEventHooks'
   | 'UpdateContactTargetQueue'
   | 'TransferContactToQueue'
-  | 'CreateCase'
-  | 'GetCase'
+  | 'GetCustomerProfile'
+  | 'CreateCustomerProfile'
   | 'Wait'
   | 'ShowView'
   | 'DisconnectParticipant';
@@ -271,39 +271,14 @@ export function transferContactToQueue(
   };
 }
 
-export function createCase(
+export function getCustomerProfile(
   key: string,
   parameters: {
-    readonly LinkContactToCase: 'true' | 'false';
-    readonly CaseTemplateId: string;
-    readonly CaseRequestFields: { readonly [fieldId: string]: string };
-  },
-  { next, notLinked, error }: {
-    readonly next: string;
-    readonly notLinked: string;
-    readonly error: string;
-  },
-): Action<'CreateCase'> {
-  return {
-    key,
-    type: 'CreateCase',
-    parameters,
-    next,
-    conditions: [],
-    errors: [
-      { error: 'ContactNotLinked', to: notLinked },
-      { error: 'NoMatchingError', to: error },
-    ],
-  };
-}
-
-export function getCase(
-  key: string,
-  parameters: {
-    readonly LinkContactToCase: 'true' | 'false';
-    readonly GetLastUpdatedCase: 'true' | 'false';
-    readonly CaseRequestFields: { readonly [fieldId: string]: string };
-    readonly CaseResponseFields: readonly string[];
+    readonly ProfileRequestData: {
+      readonly IdentifierName: string;
+      readonly IdentifierValue: string;
+    };
+    readonly ProfileResponseData: readonly string[];
   },
   { next, error, noneFound, multipleFound }: {
     readonly next: string;
@@ -311,18 +286,38 @@ export function getCase(
     readonly noneFound: string;
     readonly multipleFound: string;
   },
-): Action<'GetCase'> {
+): Action<'GetCustomerProfile'> {
   return {
     key,
-    type: 'GetCase',
+    type: 'GetCustomerProfile',
     parameters,
     next,
     conditions: [],
     errors: [
       { error: 'NoMatchingError', to: error },
-      { error: 'NoneFound', to: noneFound },
-      { error: 'MultipleFound', to: multipleFound },
+      { error: 'NoneFoundError', to: noneFound },
+      { error: 'MultipleFoundError', to: multipleFound },
     ],
+  };
+}
+
+export function createCustomerProfile(
+  key: string,
+  parameters: {
+    readonly ProfileRequestData: { readonly [field: string]: string };
+  },
+  { next, error }: {
+    readonly next: string;
+    readonly error: string;
+  },
+): Action<'CreateCustomerProfile'> {
+  return {
+    key,
+    type: 'CreateCustomerProfile',
+    parameters,
+    next,
+    conditions: [],
+    errors: [{ error: 'NoMatchingError', to: error }],
   };
 }
 

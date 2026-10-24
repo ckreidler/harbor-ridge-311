@@ -69,8 +69,14 @@ function jsonResult(statusCode: number, body: unknown, origin: string): ProxyRes
   };
 }
 
-function readBody(event: ProxyEvent): void {
-  if (!event.body) return;
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function readBody(event: ProxyEvent): unknown {
+  if (!event.body) return undefined;
   const text = event.isBase64Encoded
     ? Buffer.from(event.body, 'base64').toString('utf8')
     : event.body;
@@ -78,10 +84,21 @@ function readBody(event: ProxyEvent): void {
     throw new BodyError('Request body is too large');
   }
   try {
-    JSON.parse(text);
+    return JSON.parse(text) as unknown;
   } catch {
     throw new BodyError('Request body is not JSON');
   }
+}
+
+function chatEmail(body: unknown): string {
+  if (!isRecord(body) || !isRecord(body.Attributes) || typeof body.Attributes.email !== 'string') {
+    throw new BodyError('Chat requires an email address');
+  }
+  const email = body.Attributes.email.trim();
+  if (!EMAIL.test(email) || email.length > 254) {
+    throw new BodyError('Chat requires an email address');
+  }
+  return email;
 }
 
 async function startContact(event: ProxyEvent, channel: 'chat' | 'voice'): Promise<ProxyResult> {
@@ -91,7 +108,7 @@ async function startContact(event: ProxyEvent, channel: 'chat' | 'voice'): Promi
   }
 
   try {
-    readBody(event);
+    const body = readBody(event);
     const sdk = await touchpointRuntime.loadSdk<ConnectModule>('@aws-sdk/client-connect');
     const client = new sdk.ConnectClient();
     const input: Record<string, unknown> = {
@@ -102,6 +119,7 @@ async function startContact(event: ProxyEvent, channel: 'chat' | 'voice'): Promi
     const command = channel === 'chat'
       ? new sdk.StartChatContactCommand({
         ...input,
+        Attributes: { email: chatEmail(body) },
         SupportedMessagingContentTypes: CHAT_CONTENT_TYPES,
       })
       : new sdk.StartWebRTCContactCommand(input);

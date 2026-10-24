@@ -80,6 +80,23 @@ a {
   margin-bottom: 1.5rem;
 }
 
+.email-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0.75rem 0 1rem;
+  font-size: 0.95rem;
+}
+
+.email-field input {
+  font: inherit;
+  color: var(--ink);
+  background: #ffffff;
+  border: 1px solid var(--line);
+  padding: 0.5rem 0.65rem;
+  max-width: 24rem;
+}
+
 .contact-actions {
   display: flex;
   flex-wrap: wrap;

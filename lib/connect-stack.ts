@@ -1,6 +1,5 @@
 import * as path from 'node:path';
 import * as appintegrations from 'aws-cdk-lib/aws-appintegrations';
-import * as cases from 'aws-cdk-lib/aws-cases';
 import * as connect from 'aws-cdk-lib/aws-connect';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as kms from 'aws-cdk-lib/aws-kms';
@@ -18,30 +17,22 @@ import * as cr from 'aws-cdk-lib/custom-resources';
 import { Construct } from 'constructs';
 import { ESCALATION_GUIDE_FLOW_NAME, escalationGuideFlow } from './flows/escalation-guide-flow';
 import {
-  AFTER_HOURS_CASE_CHAT_TEXT,
-  AFTER_HOURS_CASE_TEXT_AFTER,
-  AFTER_HOURS_CASE_VOICE_TEXT,
+  AFTER_HOURS_TICKET_CHAT_TEXT,
+  AFTER_HOURS_TICKET_TEXT_AFTER,
+  AFTER_HOURS_TICKET_VOICE_TEXT,
   MAIN_FLOW_NAME,
   mainFlow,
 } from './flows/main-flow';
 import { customerQueueFlow, QUEUE_CHAT_TEXT, QUEUE_FLOW_NAME, QUEUE_VOICE_TEXT } from './flows/queue-flow';
 import { ORCHESTRATION_MODEL_ID, orchestrationPrompt } from './orchestration-prompt';
 import { SELF_SERVICE_USE_CASE } from './select-orchestrator';
+import { addTickets } from './tickets/resources';
+import { TICKET_OPERATIONS, ticketToolId, type TicketOperation } from './tickets/tools';
 
 export const SANDBOX_PARAMETER_PREFIX = '/connect/sandbox';
 export const MAIN_CONTACT_FLOW_ID_PARAMETER = `${SANDBOX_PARAMETER_PREFIX}/harbor-ridge-311/main-contact-flow-id`;
 export const MAIN_CONTACT_FLOW_ARN_PARAMETER = `${SANDBOX_PARAMETER_PREFIX}/harbor-ridge-311/main-contact-flow-arn`;
 export const CUSTOMER_QUEUE_PROMPT_ID = '666650f7-db8f-435f-bc27-77644f59f6bb';
-export const REQUEST_CATEGORY_FIELD_ID = '137be1e8-7eac-4741-9a3b-18aedbdcf77b';
-
-const ESCALATION_REASON_OPTIONS = [
-  'complex_request',
-  'technical_issue',
-  'customer_frustration',
-  'policy_exception',
-  'out_of_scope',
-  'other',
-].map((value) => ({ name: value, value }));
 
 const WEEKDAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'] as const;
 
@@ -96,50 +87,28 @@ function templateOverride(
   };
 }
 
-function singleSelectOptions(
-  stack: cdk.Stack,
-  id: string,
-  domainId: string,
-  fieldId: string,
-  fieldArn: string,
-  physicalId: string,
-  options: ReadonlyArray<{ readonly name: string; readonly value: string }>,
-): cr.AwsCustomResource {
-  const call = (active: boolean): cr.AwsSdkCall => ({
-    service: 'ConnectCases',
-    action: 'BatchPutFieldOptions',
-    parameters: {
-      domainId,
-      fieldId,
-      options: options.map((option) => ({ ...option, active })),
-    },
-    physicalResourceId: cr.PhysicalResourceId.of(physicalId),
-  });
-  return new cr.AwsCustomResource(stack, id, {
-    installLatestAwsSdk: true,
-    onCreate: call(true),
-    onUpdate: call(true),
-    onDelete: {
-      ...call(false),
-      ignoreErrorCodesMatching: 'ValidationException',
-    },
-    policy: cr.AwsCustomResourcePolicy.fromStatements([
-      new iam.PolicyStatement({
-        actions: ['cases:BatchPutFieldOptions'],
-        resources: [
-          stack.formatArn({
-            service: 'cases',
-            resource: 'domain',
-            resourceName: domainId,
-          }),
-          fieldArn,
-        ],
-      }),
-    ]),
-  });
+function ticketTool(
+  operation: TicketOperation,
+  description: string,
+  instruction: string,
+  overrides: wisdom.CfnAIAgent.ToolOverrideInputValueProperty[],
+): wisdom.CfnAIAgent.ToolConfigurationProperty {
+  return {
+    toolName: operation,
+    toolType: 'MODEL_CONTEXT_PROTOCOL',
+    toolId: ticketToolId(operation),
+    description,
+    instruction: { instruction },
+    overrideInputValues: overrides,
+  };
 }
 
-function orchestrationTools(): wisdom.CfnAIAgent.ToolConfigurationProperty[] {
+function orchestrationTools(channel: 'VOICE' | 'CHAT'): wisdom.CfnAIAgent.ToolConfigurationProperty[] {
+  const identity = [
+    templateOverride('$.contactId', '{{$.contactId}}'),
+    templateOverride('$.instanceId', '{{$.instanceId}}'),
+    templateOverride('$.customerId', '{{$.Custom.customerId}}'),
+  ];
   return [
     {
       toolName: 'Complete',
@@ -223,6 +192,36 @@ function orchestrationTools(): wisdom.CfnAIAgent.ToolConfigurationProperty[] {
         ),
       ],
     },
+    ticketTool(
+      'listMyTickets',
+      'List this caller\'s Harbor Ridge 311 tickets, newest first.',
+      'Call listMyTickets when the caller asks about an existing request. Do not pass customerId, contactId, or instanceId.',
+      identity,
+    ),
+    ticketTool(
+      'getTicket',
+      'Read one Harbor Ridge 311 ticket by its ticket id.',
+      'Call getTicket with the ticket id the caller gave you or that listMyTickets returned. A ticket id looks like HR- followed by six letters or numbers. Do not pass customerId, contactId, or instanceId.',
+      identity,
+    ),
+    ticketTool(
+      'createTicket',
+      'Open a Harbor Ridge 311 ticket for this caller.',
+      'Call createTicket when the caller wants a new trash-pickup, pothole, parking-permit, or other request. Use their words for the subject and description. Do not pass customerId, contactId, instanceId, or channel.',
+      [...identity, templateOverride('$.channel', channel)],
+    ),
+    ticketTool(
+      'updateTicket',
+      'Change a ticket description or category, or add a note.',
+      'Call updateTicket with the ticket id and at least one of description, category, or note. Do not pass customerId, contactId, or instanceId.',
+      identity,
+    ),
+    ticketTool(
+      'closeTicket',
+      'Close a Harbor Ridge 311 ticket.',
+      'Call closeTicket only after the caller confirms which ticket to close. Do not pass customerId, contactId, or instanceId.',
+      identity,
+    ),
   ];
 }
 
@@ -276,10 +275,7 @@ export class ConnectStack extends cdk.Stack {
       this,
       `${SANDBOX_PARAMETER_PREFIX}/assistant-id`,
     );
-    const casesDomainId = ssm.StringParameter.valueForStringParameter(
-      this,
-      `${SANDBOX_PARAMETER_PREFIX}/cases-domain-id`,
-    );
+    const tickets = addTickets(this, instanceArn, instanceId);
 
     const prompts = new connect.CfnDataTable(this, 'PromptsByChannel', {
       instanceArn,
@@ -322,8 +318,8 @@ export class ConnectStack extends cdk.Stack {
       ['Goodbye', 'CHAT', 'Thanks for chatting with Harbor Ridge 311. Goodbye.'],
       ['Question', 'VOICE', 'What can I help you with? You can ask about trash pickup, potholes, parking permits, or office hours. Say agent if you would rather talk to a person.'],
       ['Question', 'CHAT', 'What can I help you with? You can ask about trash pickup, potholes, parking permits, or office hours, or type agent to reach a person.'],
-      ['AfterHoursCase', 'CHAT', AFTER_HOURS_CASE_CHAT_TEXT, AFTER_HOURS_CASE_TEXT_AFTER],
-      ['AfterHoursCase', 'VOICE', AFTER_HOURS_CASE_VOICE_TEXT, AFTER_HOURS_CASE_TEXT_AFTER],
+      ['AfterHoursTicket', 'CHAT', AFTER_HOURS_TICKET_CHAT_TEXT, AFTER_HOURS_TICKET_TEXT_AFTER],
+      ['AfterHoursTicket', 'VOICE', AFTER_HOURS_TICKET_VOICE_TEXT, AFTER_HOURS_TICKET_TEXT_AFTER],
       ['Queue', 'CHAT', QUEUE_CHAT_TEXT],
       ['Queue', 'VOICE', QUEUE_VOICE_TEXT],
     ].map(([prompt, channel, text, textAfter]) => new connect.CfnDataTableRecord(this, `${prompt}${channel}`, {
@@ -480,7 +476,7 @@ export class ConnectStack extends cdk.Stack {
             locale: 'en_US',
             orchestrationAiGuardrailId: guardrailVersion.attrAiGuardrailVersionId,
             orchestrationAiPromptId: promptVersion.attrAiPromptVersionId,
-            toolConfigurations: orchestrationTools(),
+            toolConfigurations: orchestrationTools(channel === 'Voice' ? 'VOICE' : 'CHAT'),
           },
         },
       });
@@ -499,9 +495,15 @@ export class ConnectStack extends cdk.Stack {
     const orchestratorSecurityProfile = new connect.CfnSecurityProfile(this, 'OrchestratorSecurityProfile', {
       instanceArn,
       securityProfileName: 'HarborRidge311-Orchestration',
-      description: 'Lets the Harbor Ridge 311 orchestration agents retrieve FAQ answers.',
+      description: 'Lets the Harbor Ridge 311 orchestration agents retrieve FAQ answers and use ticket tools.',
       permissions: ['Wisdom.View'],
+      applications: [{
+        namespace: tickets.gatewayIdentifier,
+        type: 'MCP',
+        applicationPermissions: TICKET_OPERATIONS.map((operation) => ticketToolId(operation)),
+      }],
     });
+    orchestratorSecurityProfile.node.addDependency(tickets.applicationIntegration);
     const securityProfileId = cdk.Fn.select(3, cdk.Fn.split('/', orchestratorSecurityProfile.attrSecurityProfileArn));
     const voiceAgentArn = voiceOrchestrator.agent.attrAiAgentArn;
     const voiceAgentVersionArn = voiceOrchestrator.agentVersion.attrAiAgentArn;
@@ -716,7 +718,7 @@ export class ConnectStack extends cdk.Stack {
       },
     });
     selectOrchestrator.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['wisdom:UpdateSession'],
+      actions: ['wisdom:UpdateSession', 'wisdom:UpdateSessionData'],
       resources: [
         this.formatArn({
           service: 'wisdom',
@@ -771,13 +773,11 @@ export class ConnectStack extends cdk.Stack {
     const agentSecurityProfile = new connect.CfnSecurityProfile(this, 'AgentSecurityProfile', {
       instanceArn,
       securityProfileName: 'HarborRidge311-Agent',
-      description: 'Lets a Harbor Ridge 311 agent handle contacts, step-by-step guides, Q in Connect, and cases.',
+      description: 'Lets a Harbor Ridge 311 agent handle contacts, step-by-step guides, and Q in Connect.',
       permissions: [
         'BasicAgentAccess',
         'CustomViews.Access',
         'Wisdom.View',
-        'Cases.View',
-        'Cases.Edit',
       ],
     });
     const agentPassword = new secretsmanager.Secret(this, 'AgentPassword', {
@@ -813,81 +813,6 @@ export class ConnectStack extends cdk.Stack {
     });
 
     const dataTableId = cdk.Fn.select(3, cdk.Fn.split('/', prompts.attrArn));
-    const requestCategory = new cases.CfnField(this, 'RequestCategory', {
-      domainId: casesDomainId,
-      name: 'Request category',
-      type: 'SingleSelect',
-    });
-    const serviceAddress = new cases.CfnField(this, 'ServiceAddress', {
-      domainId: casesDomainId,
-      name: 'Service address',
-      type: 'Text',
-      attributes: { text: { isMultiline: false } },
-    });
-    const serviceRequestLayout = new cases.CfnLayout(this, 'ServiceRequestLayout', {
-      domainId: casesDomainId,
-      name: 'Harbor Ridge 311 Service Request',
-      content: {
-        basic: {
-          topPanel: {
-            sections: [{
-              fieldGroup: {
-                fields: [
-                  { id: requestCategory.attrFieldId },
-                  { id: serviceAddress.attrFieldId },
-                  { id: 'summary' },
-                  { id: 'customer_id' },
-                ],
-              },
-            }],
-          },
-        },
-      },
-    });
-    const serviceRequest = new cases.CfnTemplate(this, 'ServiceRequestTemplate', {
-      domainId: casesDomainId,
-      name: 'Harbor Ridge 311 Service Request',
-      status: 'Active',
-      layoutConfiguration: { defaultLayout: serviceRequestLayout.attrLayoutId },
-      requiredFields: [
-        { fieldId: 'title' },
-        { fieldId: requestCategory.attrFieldId },
-      ],
-    });
-    for (const resource of [requestCategory, serviceAddress, serviceRequestLayout, serviceRequest]) {
-      resource.applyRemovalPolicy(cdk.RemovalPolicy.DESTROY);
-    }
-
-    const categoryOptions = [
-      { name: 'Trash pickup', value: 'trash-pickup' },
-      { name: 'Pothole', value: 'pothole' },
-      { name: 'Parking permit', value: 'parking-permit' },
-      { name: 'Other', value: 'other' },
-    ];
-    const requestCategoryOptions = singleSelectOptions(
-      this,
-      'RequestCategoryOptions',
-      casesDomainId,
-      requestCategory.attrFieldId,
-      requestCategory.attrFieldArn,
-      'HarborRidge311-RequestCategory',
-      categoryOptions,
-    );
-    const caseReasonFieldArn = this.formatArn({
-      service: 'cases',
-      resource: 'domain',
-      resourceName: cdk.Fn.join('/', [casesDomainId, 'field', 'case_reason']),
-    });
-    const caseReasonOptions = singleSelectOptions(
-      this,
-      'CaseReasonOptions',
-      casesDomainId,
-      'case_reason',
-      caseReasonFieldArn,
-      'HarborRidge311-CaseReason',
-      ESCALATION_REASON_OPTIONS,
-    );
-    serviceRequest.node.addDependency(requestCategoryOptions);
 
     const customerQueue = customerQueueFlow({
       dataTableId,
@@ -933,8 +858,7 @@ export class ConnectStack extends cdk.Stack {
       queueArn: queue.attrQueueArn,
       escalationGuideFlowArn: escalationGuide.attrContactFlowArn,
       customerQueueFlowArn: queueFlow.attrContactFlowArn,
-      caseTemplateId: serviceRequest.attrTemplateId,
-      requestCategoryFieldId: REQUEST_CATEGORY_FIELD_ID,
+      ticketLambdaArn: tickets.lambdaArn,
     });
     const flow = new connect.CfnContactFlow(this, 'MainFlow', {
       instanceArn,
@@ -942,8 +866,8 @@ export class ConnectStack extends cdk.Stack {
       type: main.type,
       content: cdk.Fn.toJsonString(main.content),
     });
-    flow.node.addDependency(...promptRows, lexAssociation, orchestratorAssociation, caseReasonOptions);
-    setDefaultAgent.node.addDependency(botAlias, flow);
+    flow.node.addDependency(...promptRows, lexAssociation, orchestratorAssociation, tickets.lambdaIntegration);
+    setDefaultAgent.node.addDependency(botAlias, flow, tickets.target, tickets.applicationIntegration);
     const mainContactFlowId = cdk.Fn.select(3, cdk.Fn.split('/', flow.attrContactFlowArn));
     new ssm.StringParameter(this, 'MainContactFlowIdParameter', {
       parameterName: MAIN_CONTACT_FLOW_ID_PARAMETER,

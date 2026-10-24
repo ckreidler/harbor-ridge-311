@@ -22,8 +22,7 @@ const flowProps = {
   queueArn: 'queue',
   escalationGuideFlowArn: 'escalation-guide',
   customerQueueFlowArn: 'queue-flow',
-  caseTemplateId: 'template',
-  requestCategoryFieldId: '137be1e8-7eac-4741-9a3b-18aedbdcf77b',
+  ticketLambdaArn: 'ticket-lambda',
 };
 
 function matchesFixture(built: unknown, fixture: string): void {

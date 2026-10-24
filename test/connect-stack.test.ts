@@ -2,12 +2,12 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { Template } from 'aws-cdk-lib/assertions';
 import * as cdk from 'aws-cdk-lib/core';
-import { ConnectStack, CUSTOMER_QUEUE_PROMPT_ID, REQUEST_CATEGORY_FIELD_ID } from '../lib/connect-stack';
+import { ConnectStack, CUSTOMER_QUEUE_PROMPT_ID } from '../lib/connect-stack';
 import {
-  AFTER_HOURS_CASE_CHAT_TEXT,
-  AFTER_HOURS_CASE_TEXT_AFTER,
-  AFTER_HOURS_CASE_VOICE_TEXT,
   AFTER_HOURS_CLOSED_TEXT,
+  AFTER_HOURS_TICKET_CHAT_TEXT,
+  AFTER_HOURS_TICKET_TEXT_AFTER,
+  AFTER_HOURS_TICKET_VOICE_TEXT,
 } from '../lib/flows/main-flow';
 import { QUEUE_CHAT_TEXT, QUEUE_VOICE_TEXT } from '../lib/flows/queue-flow';
 
@@ -155,13 +155,13 @@ test('ConnectStack looks up the English prompts and associates the sandbox numbe
       key: ['CHAT', 'Question'],
       text: ['What can I help you with? You can ask about trash pickup, potholes, parking permits, or office hours, or type agent to reach a person.'],
     },
-    { key: ['AfterHoursCase', 'CHAT'], text: [AFTER_HOURS_CASE_CHAT_TEXT, AFTER_HOURS_CASE_TEXT_AFTER] },
-    { key: ['AfterHoursCase', 'VOICE'], text: [AFTER_HOURS_CASE_VOICE_TEXT, AFTER_HOURS_CASE_TEXT_AFTER] },
+    { key: ['AfterHoursTicket', 'CHAT'], text: [AFTER_HOURS_TICKET_CHAT_TEXT, AFTER_HOURS_TICKET_TEXT_AFTER] },
+    { key: ['AfterHoursTicket', 'VOICE'], text: [AFTER_HOURS_TICKET_VOICE_TEXT, AFTER_HOURS_TICKET_TEXT_AFTER] },
     { key: ['CHAT', 'Queue'], text: [QUEUE_CHAT_TEXT] },
     { key: ['Queue', 'VOICE'], text: [QUEUE_VOICE_TEXT] },
   ]));
   expect(rows).toHaveLength(10);
-  expect(rows.some((row) => row.key.includes('AfterHours') && !row.key.includes('AfterHoursCase'))).toBe(false);
+  expect(rows.some((row) => row.key.includes('AfterHours') && !row.key.includes('AfterHoursTicket'))).toBe(false);
   const records = JSON.stringify(recordResources);
   expect(records).not.toContain('en-US');
   expect(records).not.toContain('es-US');
@@ -324,7 +324,7 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
   template.resourceCountIs('AWS::Lex::Bot', 1);
   template.resourceCountIs('AWS::Lex::BotVersion', 1);
   template.resourceCountIs('AWS::Lex::BotAlias', 1);
-  template.resourceCountIs('AWS::Connect::IntegrationAssociation', 3);
+  template.resourceCountIs('AWS::Connect::IntegrationAssociation', 5);
   template.resourceCountIs('Custom::AWS', 8);
 
   template.hasResourceProperties('AWS::S3::Bucket', {
@@ -496,11 +496,17 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
   const integrationTypes = Object.values(integrations).map((resource) => (
     resource as { Properties: { IntegrationType: string } }
   ).Properties.IntegrationType);
-  expect(integrationTypes.sort()).toEqual(['LAMBDA_FUNCTION', 'LEX_BOT', 'WISDOM_KNOWLEDGE_BASE']);
+  expect(integrationTypes.sort()).toEqual([
+    'APPLICATION',
+    'LAMBDA_FUNCTION',
+    'LAMBDA_FUNCTION',
+    'LEX_BOT',
+    'WISDOM_KNOWLEDGE_BASE',
+  ]);
   const lambdaIntegrations = Object.values(integrations).filter((resource) => (
     resource as { Properties: { IntegrationType: string } }
   ).Properties.IntegrationType === 'LAMBDA_FUNCTION');
-  expect(lambdaIntegrations).toHaveLength(1);
+  expect(lambdaIntegrations).toHaveLength(2);
 
   const parameters = template.toJSON().Parameters as Record<string, { Default?: string }>;
   const instanceArnParameter = Object.entries(parameters).find(([, parameter]) => (
@@ -509,9 +515,11 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
   const connectPermissions = Object.values(template.findResources('AWS::Lambda::Permission') as Record<string, {
     Properties: { Action?: string; Principal?: string; SourceArn?: { Ref?: string } };
   }>).filter((permission) => permission.Properties.Principal === 'connect.amazonaws.com');
-  expect(connectPermissions).toHaveLength(1);
-  expect(connectPermissions[0]?.Properties.Action).toBe('lambda:InvokeFunction');
-  expect(connectPermissions[0]?.Properties.SourceArn).toEqual({ Ref: instanceArnParameter });
+  expect(connectPermissions).toHaveLength(2);
+  for (const permission of connectPermissions) {
+    expect(permission.Properties.Action).toBe('lambda:InvokeFunction');
+    expect(permission.Properties.SourceArn).toEqual({ Ref: instanceArnParameter });
+  }
 
   template.hasResourceProperties('AWS::Lambda::Function', {
     FunctionName: 'HarborRidge311-SelectOrchestrator',
@@ -632,7 +640,7 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
   expect(JSON.stringify(escalation?.Parameters)).toContain('"customerIntent":"$.Lex.SessionAttributes.customerIntent"');
   expect(JSON.stringify(escalation?.Parameters)).toContain('"sentiment":"$.Lex.SessionAttributes.sentiment"');
   expect(content.Actions.find((action) => action.Identifier === 'play-greeting')?.Transitions?.NextAction)
-    .toBe('create-assistant-session');
+    .toBe('branch-identity');
   expect(content.Metadata).toBeUndefined();
 
   const associateStatements = policyStatements(template).filter((statement) => {
@@ -721,10 +729,10 @@ test('ConnectStack opens an after-hours case and removes voicemail', () => {
   expect(hoursCheck?.Transitions?.Conditions?.find((branch) => branch.Condition.Operands[0] === 'True')?.NextAction)
     .toBe('set-event-flow');
   expect(hoursCheck?.Transitions?.Conditions?.find((branch) => branch.Condition.Operands[0] === 'False')?.NextAction)
-    .toBe('check-case-title');
+    .toBe('check-ticket-subject');
   expect(hoursCheck?.Transitions?.Errors?.[0]).toEqual({
     ErrorType: 'NoMatchingError',
-    NextAction: 'check-case-title',
+    NextAction: 'check-ticket-subject',
   });
   expect(main.Actions.some((action) => action.Identifier === 'play-agent-placeholder')).toBe(false);
   expect(main.Actions.some((action) => action.Identifier === 'transfer-after-hours')).toBe(false);
@@ -735,135 +743,63 @@ test('ConnectStack opens an after-hours case and removes voicemail', () => {
   expect(Object.keys(template.findResources('AWS::Connect::ContactFlow')).some((id) => id.startsWith('AfterHours')))
     .toBe(false);
 
-  expect(main.Actions.some((action) => action.Identifier === 'create-profile')).toBe(false);
-  expect(main.Actions.some((action) => action.Type === 'CreateCustomerProfile')).toBe(false);
-  expect(block('check-case-title').Parameters?.ComparisonValue).toBe('$.Attributes.customerIntent');
-  expect(block('check-case-title').Transitions?.Conditions?.[0]).toMatchObject({
-    NextAction: 'set-case-title',
+  expect(main.Actions.some((action) => action.Type === 'GetCustomerProfile')).toBe(true);
+  expect(main.Actions.some((action) => action.Type === 'CreateCustomerProfile')).toBe(true);
+  expect(block('check-ticket-subject').Parameters?.ComparisonValue).toBe('$.Attributes.customerIntent');
+  expect(block('check-ticket-subject').Transitions?.Conditions?.[0]).toMatchObject({
+    NextAction: 'set-ticket-subject',
     Condition: { Operator: 'Exists', Operands: [] },
   });
-  expect(JSON.stringify(block('set-case-title').Parameters)).toContain('"caseTitle":"$.Attributes.customerIntent"');
-  expect(JSON.stringify(block('set-fallback-title').Parameters)).toContain('"caseTitle":"After-hours escalation"');
-  expect(block('set-case-title').Transitions?.NextAction).toBe('create-case');
-  expect(block('set-fallback-title').Transitions?.NextAction).toBe('create-case');
-  expect(block('set-fallback-title').Transitions?.Errors?.[0].NextAction).toBe('play-closed');
+  expect(JSON.stringify(block('set-ticket-subject').Parameters)).toContain('"ticketSubject":"$.Attributes.customerIntent"');
+  expect(JSON.stringify(block('set-fallback-subject').Parameters)).toContain('"ticketSubject":"After-hours request"');
+  expect(block('set-ticket-subject').Transitions?.NextAction).toBe('check-customer-id');
+  expect(block('set-fallback-subject').Transitions?.NextAction).toBe('check-customer-id');
+  expect(block('set-fallback-subject').Transitions?.Errors?.[0].NextAction).toBe('play-closed');
 
-  const createCase = JSON.stringify(block('create-case'));
-  expect(block('create-case').Type).toBe('CreateCase');
-  expect(createCase).toContain('"LinkContactToCase":"true"');
-  expect(createCase).toContain('"CaseTemplateId":"token"');
-  expect(createCase).not.toContain('customer_id');
-  expect(createCase).not.toContain('ProfileARN');
-  expect(createCase).toContain('"title":"$.Attributes.caseTitle"');
-  expect(createCase).toContain('"summary":"$.Attributes.escalationSummary"');
-  expect(createCase).toContain('"case_reason":"$.Attributes.escalationReason"');
-  expect(createCase).toContain(`"${REQUEST_CATEGORY_FIELD_ID}":"other"`);
-  expect(createCase).toContain('"status":"open"');
-  expect(block('create-case').Transitions?.NextAction).toBe('get-case');
-  expect(block('create-case').Transitions?.Errors).toEqual([
-    { ErrorType: 'ContactNotLinked', NextAction: 'get-case' },
-    { ErrorType: 'NoMatchingError', NextAction: 'create-case-other' },
-  ]);
-  const retryCase = JSON.stringify(block('create-case-other'));
-  expect(block('create-case-other').Type).toBe('CreateCase');
-  expect(retryCase).toContain('"case_reason":"other"');
-  expect(retryCase).toContain('"title":"$.Attributes.caseTitle"');
-  expect(retryCase).toContain('"summary":"$.Attributes.escalationSummary"');
-  expect(retryCase).toContain(`"${REQUEST_CATEGORY_FIELD_ID}":"other"`);
-  expect(retryCase).toContain('"status":"open"');
-  expect(retryCase).not.toContain('escalationReason');
-  expect(block('create-case-other').Transitions?.NextAction).toBe('get-case');
-  expect(block('create-case-other').Transitions?.Errors).toEqual([
-    { ErrorType: 'ContactNotLinked', NextAction: 'get-case' },
-    { ErrorType: 'NoMatchingError', NextAction: 'play-closed' },
-  ]);
-
-  const getCaseParameters = {
-    LinkContactToCase: 'false',
-    GetLastUpdatedCase: 'true',
-    CaseRequestFields: { case_id: '$.Case.case_id' },
-    CaseResponseFields: ['reference_number'],
-  };
-  expect(block('get-case').Type).toBe('GetCase');
-  expect(block('get-case').Parameters).toEqual(getCaseParameters);
-  expect(block('get-case').Transitions?.NextAction).toBe('lookup-after-hours-case');
-  expect(block('get-case').Transitions?.Errors).toEqual([
-    { ErrorType: 'NoMatchingError', NextAction: 'branch-case-hold' },
-    { ErrorType: 'NoneFound', NextAction: 'branch-case-hold' },
-    { ErrorType: 'MultipleFound', NextAction: 'branch-case-hold' },
-  ]);
-  expect(block('branch-case-hold').Transitions?.Conditions?.[0]).toMatchObject({
-    NextAction: 'play-case-hold-chat',
-    Condition: { Operator: 'Equals', Operands: ['CHAT'] },
+  expect(block('create-ticket').Type).toBe('InvokeLambdaFunction');
+  expect(block('create-ticket').Parameters?.InvocationTimeLimitSeconds).toBe('8');
+  expect(block('create-ticket').Transitions?.NextAction).toBe('check-ticket-id');
+  expect(block('create-ticket').Transitions?.Errors?.[0].NextAction).toBe('play-closed');
+  expect(block('check-customer-id').Transitions?.Conditions?.[0]).toMatchObject({
+    NextAction: 'create-ticket',
+    Condition: { Operator: 'Exists', Operands: [] },
   });
-  expect(block('branch-case-hold').Transitions?.NextAction).toBe('play-case-hold-voice');
-  expect(block('play-case-hold-chat').Parameters?.Text).toBe('One moment while we log your request.');
-  expect(block('play-case-hold-chat').Transitions?.NextAction).toBe('wait-case');
-  expect(block('wait-case')).toMatchObject({
-    Type: 'Wait',
-    Parameters: { TimeLimitSeconds: '3' },
-    Transitions: {
-      NextAction: 'get-case-retry',
-      Conditions: [
-        {
-          NextAction: 'get-case-retry',
-          Condition: { Operator: 'Equals', Operands: ['WaitCompleted'] },
-        },
-      ],
-    },
-  });
-  expect(block('play-case-hold-voice').Parameters?.SSML).toBe(
-    '<speak>One moment while we log your request.<break time="2s"/></speak>',
-  );
-  expect(block('play-case-hold-voice').Parameters?.Text).toBeUndefined();
-  expect(block('play-case-hold-voice').Transitions?.NextAction).toBe('get-case-retry');
-  expect(block('get-case-retry').Type).toBe('GetCase');
-  expect(block('get-case-retry').Parameters).toEqual(getCaseParameters);
-  expect(block('get-case-retry').Transitions?.NextAction).toBe('lookup-after-hours-case');
-  expect(block('get-case-retry').Transitions?.Errors).toEqual([
-    { ErrorType: 'NoMatchingError', NextAction: 'play-closed' },
-    { ErrorType: 'NoneFound', NextAction: 'play-closed' },
-    { ErrorType: 'MultipleFound', NextAction: 'play-closed' },
-  ]);
-
-  expect(block('lookup-after-hours-case').Parameters?.Queries).toEqual([{
-    QueryName: 'AfterHoursCase',
+  expect(block('check-customer-id').Transitions?.NextAction).toBe('play-closed');
+  expect(block('check-ticket-id').Parameters?.ComparisonValue).toBe('$.External.ticketId');
+  expect(block('lookup-after-hours-ticket').Parameters?.Queries).toEqual([{
+    QueryName: 'AfterHoursTicket',
     Attributes: ['Text', 'TextAfter'],
     PrimaryValues: [
-      { AttributeName: 'Prompt', Value: 'AfterHoursCase' },
+      { AttributeName: 'Prompt', Value: 'AfterHoursTicket' },
       { AttributeName: 'Channel', Value: '$.Channel' },
     ],
   }]);
-  expect(block('check-case-prompt').Transitions?.Conditions?.[0]).toMatchObject({
-    NextAction: 'check-reference',
+  expect(block('check-ticket-prompt').Transitions?.Conditions?.[0]).toMatchObject({
+    NextAction: 'branch-ticket-channel',
     Condition: { Operator: 'Exists', Operands: [] },
   });
-  expect(block('check-reference').Parameters?.ComparisonValue).toBe('$.Case.reference_number');
-  expect(block('check-reference').Transitions?.Conditions?.[0]).toMatchObject({
-    NextAction: 'branch-case-channel',
-    Condition: { Operator: 'Exists', Operands: [] },
-  });
-  expect(block('check-reference').Transitions?.NextAction).toBe('play-closed');
-  expect(block('play-case-chat').Parameters?.Text).toBe(
-    '$.DataTables.AfterHoursCase.Text $.Case.reference_number. $.DataTables.AfterHoursCase.TextAfter',
+  expect(block('play-ticket-chat').Parameters?.Text).toBe(
+    '$.DataTables.AfterHoursTicket.Text $.External.ticketId. $.DataTables.AfterHoursTicket.TextAfter',
   );
-  expect(block('play-case-chat').Parameters?.SSML).toBeUndefined();
-  expect(block('play-case-chat').Transitions?.NextAction).toBe('disconnect');
-  expect(block('play-case-voice').Parameters?.SSML).toBe(
-    '<speak>$.DataTables.AfterHoursCase.Text <say-as interpret-as="digits">$.Case.reference_number</say-as>. $.DataTables.AfterHoursCase.TextAfter</speak>',
+  expect(block('play-ticket-chat').Parameters?.SSML).toBeUndefined();
+  expect(block('play-ticket-chat').Transitions?.NextAction).toBe('disconnect');
+  expect(block('play-ticket-voice').Parameters?.SSML).toBe(
+    '<speak>$.DataTables.AfterHoursTicket.Text <say-as interpret-as="characters">$.External.ticketId</say-as>. $.DataTables.AfterHoursTicket.TextAfter</speak>',
   );
-  expect(block('play-case-voice').Parameters?.Text).toBeUndefined();
-  expect(block('play-case-voice').Transitions?.NextAction).toBe('disconnect');
-  expect(block('play-case-voice').Transitions?.Errors?.[0].NextAction).toBe('play-closed');
+  expect(block('play-ticket-voice').Parameters?.Text).toBeUndefined();
+  expect(block('play-ticket-voice').Transitions?.NextAction).toBe('disconnect');
+  expect(block('play-ticket-voice').Transitions?.Errors?.[0].NextAction).toBe('play-closed');
+  expect(JSON.stringify(main)).not.toContain('CreateCase');
+  expect(JSON.stringify(main)).not.toContain('GetCase');
   expect(block('play-closed').Parameters?.Text).toBe(AFTER_HOURS_CLOSED_TEXT);
   expect(block('play-closed').Transitions?.NextAction).toBe('disconnect');
   expect(JSON.stringify(main)).not.toContain('Voicemail');
   expect(JSON.stringify(main)).not.toContain('leave a message');
   const mainRaw = JSON.stringify(contactFlow(template, 'HarborRidge311-Main').Properties.Content);
-  expect(mainRaw).toContain('ServiceRequestTemplate');
-  expect(mainRaw).toContain('TemplateId');
+  expect(mainRaw).not.toContain('ServiceRequestTemplate');
+  expect(mainRaw).not.toContain('case_reason');
 
-  template.resourceCountIs('AWS::DynamoDB::Table', 0);
+  template.resourceCountIs('AWS::DynamoDB::Table', 1);
   template.resourceCountIs('AWS::Events::Rule', 0);
   template.resourceCountIs('AWS::SQS::Queue', 0);
   template.resourceCountIs('AWS::Lambda::EventInvokeConfig', 0);
@@ -877,169 +813,130 @@ test('ConnectStack opens an after-hours case and removes voicemail', () => {
   expect(templateText).not.toContain('HarborRidge311-AfterHours');
 });
 
-test('ConnectStack adds an active Harbor Ridge 311 case template', () => {
+test('ConnectStack stores customer-scoped tickets behind an IAM API and a JWT gateway', () => {
   const app = new cdk.App();
   const template = Template.fromStack(new ConnectStack(app, 'ConnectStack'));
+  const text = JSON.stringify(template.toJSON());
 
   template.resourceCountIs('AWS::Cases::Domain', 0);
-  template.resourceCountIs('AWS::Cases::Field', 2);
-  template.resourceCountIs('AWS::Cases::Layout', 1);
-  template.resourceCountIs('AWS::Cases::Template', 1);
+  template.resourceCountIs('AWS::Cases::Field', 0);
+  template.resourceCountIs('AWS::Cases::Layout', 0);
+  template.resourceCountIs('AWS::Cases::Template', 0);
+  expect(text).not.toContain('cases-domain-id');
+  expect(text).not.toContain('cases:');
+  expect(text).not.toContain('BatchPutFieldOptions');
 
-  template.hasResourceProperties('AWS::Cases::Field', {
-    Name: 'Request category',
-    Type: 'SingleSelect',
-  });
-  template.hasResourceProperties('AWS::Cases::Field', {
-    Name: 'Service address',
-    Type: 'Text',
-    Attributes: { Text: { IsMultiline: false } },
-  });
-  const fieldNames = Object.values(template.findResources('AWS::Cases::Field')).map((resource) => (
-    resource as { Properties: { Name: string } }
-  ).Properties.Name);
-  expect(fieldNames.sort()).toEqual(['Request category', 'Service address']);
-
-  const parameters = template.toJSON().Parameters as Record<string, { Default?: string }>;
-  const casesDomainParameter = Object.entries(parameters).find(([, parameter]) => (
-    parameter.Default === '/connect/sandbox/cases-domain-id'
-  ));
-  expect(casesDomainParameter).toBeDefined();
-  const casesResources = {
-    ...template.findResources('AWS::Cases::Field'),
-    ...template.findResources('AWS::Cases::Layout'),
-    ...template.findResources('AWS::Cases::Template'),
-  };
-  for (const resource of Object.values(casesResources) as Array<{
+  const tables = template.findResources('AWS::DynamoDB::Table') as Record<string, {
     DeletionPolicy?: string;
     UpdateReplacePolicy?: string;
-    Properties: { DomainId?: unknown };
-  }>) {
-    expect(resource.DeletionPolicy).toBe('Delete');
-    expect(resource.UpdateReplacePolicy).toBe('Delete');
-    expect(resource.Properties.DomainId).toEqual({ Ref: casesDomainParameter?.[0] });
+    Properties: {
+      TableName: string;
+      BillingMode: string;
+      KeySchema: Array<{ AttributeName: string; KeyType: string }>;
+      GlobalSecondaryIndexes: Array<{
+        IndexName: string;
+        KeySchema: Array<{ AttributeName: string; KeyType: string }>;
+        Projection: { ProjectionType: string };
+      }>;
+    };
+  }>;
+  const table = Object.values(tables)[0];
+  expect(table?.DeletionPolicy).toBe('Delete');
+  expect(table?.UpdateReplacePolicy).toBe('Delete');
+  expect(table?.Properties.TableName).toBe('HarborRidge311Tickets');
+  expect(table?.Properties.BillingMode).toBe('PAY_PER_REQUEST');
+  expect(table?.Properties.KeySchema).toEqual([{ AttributeName: 'ticketId', KeyType: 'HASH' }]);
+  expect(table?.Properties.GlobalSecondaryIndexes).toEqual([{
+    IndexName: 'ByCustomer',
+    KeySchema: [
+      { AttributeName: 'customerId', KeyType: 'HASH' },
+      { AttributeName: 'createdAt', KeyType: 'RANGE' },
+    ],
+    Projection: { ProjectionType: 'ALL' },
+  }]);
+
+  template.hasResourceProperties('AWS::ApiGateway::Stage', {
+    StageName: 'prod',
+    MethodSettings: [{
+      ResourcePath: '/*',
+      HttpMethod: '*',
+      ThrottlingRateLimit: 5,
+      ThrottlingBurstLimit: 10,
+    }],
+  });
+  const methods = Object.values(template.findResources('AWS::ApiGateway::Method')) as Array<{
+    Properties: { AuthorizationType: string; HttpMethod: string; OperationName?: string };
+  }>;
+  const operations = methods
+    .filter((method) => method.Properties.HttpMethod !== 'OPTIONS')
+    .map((method) => `${method.Properties.HttpMethod} ${method.Properties.OperationName}`);
+  expect(operations.sort()).toEqual([
+    'GET getTicket',
+    'GET listMyTickets',
+    'POST closeTicket',
+    'POST createTicket',
+    'POST updateTicket',
+  ]);
+  for (const method of methods) {
+    if (method.Properties.HttpMethod === 'OPTIONS') continue;
+    expect(method.Properties.AuthorizationType).toBe('AWS_IAM');
   }
 
-  const categoryId = Object.entries(template.findResources('AWS::Cases::Field')).find(([, resource]) => (
-    (resource as { Properties: { Name: string } }).Properties.Name === 'Request category'
-  ))?.[0];
-  const addressId = Object.entries(template.findResources('AWS::Cases::Field')).find(([, resource]) => (
-    (resource as { Properties: { Name: string } }).Properties.Name === 'Service address'
-  ))?.[0];
-  template.hasResourceProperties('AWS::Cases::Layout', {
-    Name: 'Harbor Ridge 311 Service Request',
-    Content: {
-      Basic: {
-        TopPanel: {
-          Sections: [{
-            FieldGroup: {
-              Fields: [
-                { Id: { 'Fn::GetAtt': [categoryId, 'FieldId'] } },
-                { Id: { 'Fn::GetAtt': [addressId, 'FieldId'] } },
-                { Id: 'summary' },
-                { Id: 'customer_id' },
-              ],
-            },
-          }],
-        },
-      },
-    },
+  template.hasResourceProperties('AWS::BedrockAgentCore::Gateway', {
+    Name: 'HarborRidge311Tickets',
+    ProtocolType: 'MCP',
+    AuthorizerType: 'CUSTOM_JWT',
   });
-  const layout = JSON.stringify(template.findResources('AWS::Cases::Layout'));
-  expect(layout).not.toContain('"title"');
-  expect(layout).not.toContain('"status"');
-
-  const layoutId = Object.keys(template.findResources('AWS::Cases::Layout'))[0];
-  template.hasResourceProperties('AWS::Cases::Template', {
-    Name: 'Harbor Ridge 311 Service Request',
-    Status: 'Active',
-    LayoutConfiguration: { DefaultLayout: { 'Fn::GetAtt': [layoutId, 'LayoutId'] } },
-    RequiredFields: [
-      { FieldId: 'title' },
-      { FieldId: { 'Fn::GetAtt': [categoryId, 'FieldId'] } },
-    ],
+  template.hasResourceProperties('AWS::BedrockAgentCore::GatewayTarget', {
+    Name: 'Tickets',
+    CredentialProviderConfigurations: [{
+      CredentialProviderType: 'GATEWAY_IAM_ROLE',
+      CredentialProvider: { IamCredentialProvider: { Service: 'execute-api' } },
+    }],
   });
-
-  const options = JSON.stringify(template.findResources('Custom::AWS'));
-  expect(options).toContain('BatchPutFieldOptions');
-  expect(options).toContain('Trash pickup');
-  expect(options).toContain('trash-pickup');
-  expect(options).toContain('Pothole');
-  expect(options).toContain('pothole');
-  expect(options).toContain('Parking permit');
-  expect(options).toContain('parking-permit');
-  expect(options).toContain('Other');
-  expect(options).toContain('HarborRidge311-RequestCategory');
-  expect(options).toContain('HarborRidge311-CaseReason');
-  for (const reason of [
-    'complex_request',
-    'technical_issue',
-    'customer_frustration',
-    'policy_exception',
-    'out_of_scope',
-    'other',
-  ]) {
-    expect(options).toContain(reason);
-  }
-  expect(options).toContain('\\"active\\":false');
-  const optionPolicies = policyStatements(template).filter((statement) => {
-    const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action];
-    return actions.some((action) => action.startsWith('cases:'));
+  template.hasResourceProperties('AWS::AppIntegrations::Application', {
+    Name: 'HarborRidge311Tickets',
+    ApplicationType: 'MCP_SERVER',
   });
-  expect(optionPolicies).toHaveLength(2);
-  const domainArn = {
-    'Fn::Join': [
-      '',
-      [
-        'arn:',
-        { Ref: 'AWS::Partition' },
-        ':cases:',
-        { Ref: 'AWS::Region' },
-        ':',
-        { Ref: 'AWS::AccountId' },
-        ':domain/',
-        { Ref: casesDomainParameter?.[0] },
+  template.hasResourceProperties('AWS::Connect::SecurityProfile', {
+    SecurityProfileName: 'HarborRidge311-Orchestration',
+    Applications: [{
+      Type: 'MCP',
+      ApplicationPermissions: [
+        'Tickets___createTicket',
+        'Tickets___getTicket',
+        'Tickets___listMyTickets',
+        'Tickets___updateTicket',
+        'Tickets___closeTicket',
       ],
-    ],
-  };
-  const categoryStatement = optionPolicies.find((statement) => JSON.stringify(statement).includes(categoryId ?? ''));
-  expect([categoryStatement?.Action].flat()).toEqual(['cases:BatchPutFieldOptions']);
-  expect(categoryStatement?.Resource).toEqual([
-    domainArn,
-    { 'Fn::GetAtt': [categoryId, 'FieldArn'] },
-  ]);
-  const reasonStatement = optionPolicies.find((statement) => JSON.stringify(statement).includes('case_reason'));
-  expect([reasonStatement?.Action].flat()).toEqual(['cases:BatchPutFieldOptions']);
-  expect(reasonStatement?.Resource).toEqual([
-    domainArn,
-    {
-      'Fn::Join': [
-        '',
-        [
-          'arn:',
-          { Ref: 'AWS::Partition' },
-          ':cases:',
-          { Ref: 'AWS::Region' },
-          ':',
-          { Ref: 'AWS::AccountId' },
-          ':domain/',
-          {
-            'Fn::Join': [
-              '/',
-              [
-                { Ref: casesDomainParameter?.[0] },
-                'field/case_reason',
-              ],
-            ],
-          },
-        ],
-      ],
-    },
-  ]);
-  for (const statement of optionPolicies) {
+    }],
+  });
+  expect(text).toContain('Tickets___createTicket');
+  expect(text).toContain('MODEL_CONTEXT_PROTOCOL');
+  expect(text).toContain('{{$.contactId}}');
+  expect(text).toContain('{{$.instanceId}}');
+  expect(text).toContain('{{$.Custom.customerId}}');
+
+  const custom = JSON.stringify(template.findResources('Custom::AWS'));
+  expect(custom).toContain('updateGateway');
+  expect(custom).toContain('describeInstance');
+  expect(custom).toContain('customJWTAuthorizer');
+  expect(custom).toContain('.my.connect.aws/.well-known/openid-configuration');
+
+  const ticketActions = policyStatements(template).filter((statement) => {
     const actions = [statement.Action].flat();
-    expect(actions.every((action) => action === 'cases:BatchPutFieldOptions')).toBe(true);
-    expect(JSON.stringify(statement.Resource)).not.toContain('*');
+    return actions.some((action) => (
+      action.startsWith('execute-api:')
+      || action.startsWith('bedrock-agentcore:')
+      || action === 'connect:GetContactAttributes'
+      || action === 'connect:DescribeInstance'
+    ));
+  });
+  expect(ticketActions.length).toBeGreaterThan(0);
+  for (const statement of ticketActions) {
+    const actions = [statement.Action].flat();
+    expect(actions.some((action) => action === '*' || action.endsWith(':*'))).toBe(false);
+    expect(JSON.stringify(statement.Resource)).not.toMatch(/"\*"/);
   }
 });
 
@@ -1074,8 +971,6 @@ test('ConnectStack transfers an in-hours escalation and keeps the agent password
     'BasicAgentAccess',
     'CustomViews.Access',
     'Wisdom.View',
-    'Cases.View',
-    'Cases.Edit',
   ];
   template.hasResourceProperties('AWS::Connect::SecurityProfile', {
     SecurityProfileName: 'HarborRidge311-Agent',
