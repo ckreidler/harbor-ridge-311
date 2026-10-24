@@ -7,8 +7,8 @@ import {
   messageParticipant,
   messageParticipantIteratively,
   wait,
+  type CompiledFlow,
   type DataTableQuery,
-  type FlowContent,
 } from '../flow';
 
 export interface CustomerQueueFlowProps {
@@ -33,7 +33,7 @@ function promptQuery(queryName: string): DataTableQuery {
   };
 }
 
-export function customerQueueFlow(props: CustomerQueueFlowProps): FlowContent {
+export function customerQueueFlow(props: CustomerQueueFlowProps): CompiledFlow<typeof CUSTOMER_QUEUE> {
   return flow({
     name: QUEUE_FLOW_NAME,
     type: CUSTOMER_QUEUE,
@@ -67,14 +67,14 @@ export function customerQueueFlow(props: CustomerQueueFlowProps): FlowContent {
         Messages: [
           { Text: '$.DataTables.QueueVoice.Text' },
           { PromptId: props.holdMusicPromptArn },
-      ],
-    }, { next: 'loop-hold' }),
-    messageParticipantIteratively('loop-hold-fallback', {
-      Messages: [
-        { Text: QUEUE_VOICE_TEXT },
-        { PromptId: props.holdMusicPromptArn },
-      ],
-    }, { next: 'loop-hold-fallback' }),
+        ],
+      }, { next: 'loop-hold' }),
+      messageParticipantIteratively('loop-hold-fallback', {
+        Messages: [
+          { Text: QUEUE_VOICE_TEXT },
+          { PromptId: props.holdMusicPromptArn },
+        ],
+      }, { next: 'loop-hold-fallback' }),
     ],
   });
 }

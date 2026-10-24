@@ -11,11 +11,18 @@ export type ActionsForFlowType = {
   CUSTOMER_QUEUE: CustomerQueueAction;
 };
 
-export interface FlowDefinition<T extends ConnectFlowType> {
-  readonly name: string;
+export type FlowDefinition = {
+  [T in ConnectFlowType]: {
+    readonly name: string;
+    readonly type: T;
+    readonly start: string;
+    readonly actions: readonly ActionsForFlowType[T][];
+  };
+}[ConnectFlowType];
+
+export interface CompiledFlow<T extends ConnectFlowType = ConnectFlowType> {
   readonly type: T;
-  readonly start: string;
-  readonly actions: readonly ActionsForFlowType[T][];
+  readonly content: FlowContent;
 }
 
 export interface FlowTransitions {
@@ -146,22 +153,37 @@ function transitions(action: FlowAction): FlowTransitions {
   };
 }
 
-export function flow<T extends ConnectFlowType>(definition: FlowDefinition<T>): FlowContent {
+function listedActions(definition: FlowDefinition): readonly FlowAction[] {
+  switch (definition.type) {
+    case CUSTOMER_QUEUE:
+      return definition.actions;
+    case CONTACT_FLOW:
+      return definition.actions;
+  }
+}
+
+export function flow<T extends ConnectFlowType>(
+  definition: Extract<FlowDefinition, { readonly type: T }>,
+): CompiledFlow<T> {
   if (Token.isUnresolved(definition.name)) {
     throw new Error('flow name must be a literal string, not a token');
   }
-  const found = problems(definition);
+  const actions = listedActions(definition);
+  const found = problems({ start: definition.start, actions });
   if (found.length > 0) {
     throw new Error(`invalid flow ${definition.name}:\n${found.map((problem) => `  - ${problem}`).join('\n')}`);
   }
   return {
-    Version: '2019-10-30',
-    StartAction: definition.start,
-    Actions: definition.actions.map((action) => ({
-      Identifier: action.key,
-      Type: action.type,
-      Parameters: action.parameters,
-      Transitions: transitions(action),
-    })),
+    type: definition.type,
+    content: {
+      Version: '2019-10-30',
+      StartAction: definition.start,
+      Actions: actions.map((action) => ({
+        Identifier: action.key,
+        Type: action.type,
+        Parameters: action.parameters,
+        Transitions: transitions(action),
+      })),
+    },
   };
 }

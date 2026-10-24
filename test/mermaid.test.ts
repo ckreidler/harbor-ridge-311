@@ -34,7 +34,7 @@ test('toMermaid labels actions and branches in flow order', () => {
       }),
       disconnectParticipant('end'),
     ],
-  });
+  }).content;
 
   expect(toMermaid(compiled)).toBe([
     'flowchart TD',

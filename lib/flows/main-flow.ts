@@ -20,8 +20,8 @@ import {
   updateContactTextToSpeechVoice,
   updateFlowLoggingBehavior,
   wait,
+  type CompiledFlow,
   type DataTableQuery,
-  type FlowContent,
 } from '../flow';
 
 export interface MainFlowProps {
@@ -76,7 +76,7 @@ const getCaseParameters = {
   CaseResponseFields: ['reference_number'],
 } as const;
 
-export function mainFlow(props: MainFlowProps): FlowContent {
+export function mainFlow(props: MainFlowProps): CompiledFlow<typeof CONTACT_FLOW> {
   const caseFields = (caseReason: string) => ({
     title: '$.Attributes.caseTitle',
     summary: '$.Attributes.escalationSummary',

@@ -1,7 +1,14 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as cdk from 'aws-cdk-lib/core';
-import { CONTACT_FLOW, CUSTOMER_QUEUE, disconnectParticipant, flow, messageParticipant } from '../lib/flow';
+import {
+  CONTACT_FLOW,
+  CUSTOMER_QUEUE,
+  disconnectParticipant,
+  flow,
+  messageParticipant,
+  type ConnectFlowType,
+} from '../lib/flow';
 import { escalationGuideFlow } from '../lib/flows/escalation-guide-flow';
 import { mainFlow } from '../lib/flows/main-flow';
 import { customerQueueFlow } from '../lib/flows/queue-flow';
@@ -30,20 +37,20 @@ function matchesFixture(built: unknown, fixture: string): void {
 }
 
 test('builder MainFlow matches the hand-written flow except Metadata', () => {
-  matchesFixture(mainFlow(flowProps), 'main-flow-0966293.json');
+  matchesFixture(mainFlow(flowProps).content, 'main-flow-0966293.json');
 });
 
 test('builder customer queue flow matches the hand-written flow except Metadata', () => {
   matchesFixture(customerQueueFlow({
     dataTableId: 'table',
     holdMusicPromptArn: 'hold-music',
-  }), 'queue-flow-0966293.json');
+  }).content, 'queue-flow-0966293.json');
 });
 
 test('builder escalation guide matches the hand-written flow except Metadata', () => {
   matchesFixture(escalationGuideFlow({
     detailViewArn: 'arn:aws:connect:us-west-2:aws:view/detail:1',
-  }), 'escalation-guide-flow-0966293.json');
+  }).content, 'escalation-guide-flow-0966293.json');
 });
 
 test('action identifiers are the action keys and stay stable across compiles', () => {
@@ -51,13 +58,15 @@ test('action identifiers are the action keys and stay stable across compiles', (
   const first = flow({ type: CONTACT_FLOW, name: 'Test', start: 'end', actions });
   expect(flow({ type: CONTACT_FLOW, name: 'Test', start: 'end', actions })).toEqual(first);
   expect(flow({ type: CONTACT_FLOW, name: 'Other', start: 'end', actions })).toEqual(first);
-  expect(first.StartAction).toBe('end');
-  expect(first.Actions.map((action) => action.Identifier)).toEqual(['end']);
+  expect(first.content.StartAction).toBe('end');
+  expect(first.content.Actions.map((action) => action.Identifier)).toEqual(['end']);
+  expect(first.type).toBe(CONTACT_FLOW);
 
   const main = mainFlow(flowProps);
   expect(mainFlow(flowProps)).toEqual(main);
-  expect(main.StartAction).toBe('enable-flow-logging');
-  expect(main.Actions.map((action) => action.Identifier)).toContain('disconnect');
+  expect(main.type).toBe(CONTACT_FLOW);
+  expect(main.content.StartAction).toBe('enable-flow-logging');
+  expect(main.content.Actions.map((action) => action.Identifier)).toContain('disconnect');
 });
 
 test('flow() rejects a dangling transition', () => {
@@ -124,7 +133,7 @@ test('flow() rejects an action key that is not a valid Identifier', () => {
     name: 'Test',
     start: limit,
     actions: [disconnectParticipant(limit)],
-  }).StartAction).toBe(limit);
+  }).content.StartAction).toBe(limit);
 });
 
 test('flow() rejects a token flow name or action key', () => {
@@ -152,5 +161,16 @@ test('CUSTOMER_QUEUE rejects disconnectParticipant', () => {
       // @ts-expect-error disconnectParticipant is not a customer queue action
       disconnectParticipant('end'),
     ],
+  });
+});
+
+test('a widened flow type still rejects disconnectParticipant', () => {
+  const type = CUSTOMER_QUEUE as ConnectFlowType;
+  // @ts-expect-error ConnectFlowType matches neither flow definition
+  flow({
+    name: 'Queue',
+    type,
+    start: 'end',
+    actions: [disconnectParticipant('end')],
   });
 });

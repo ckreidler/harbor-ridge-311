@@ -18,19 +18,19 @@ const mainFlowProps: MainFlowProps = {
 
 export function flowPages(): Array<{ name: string; body: string }> {
   return [
-    { name: MAIN_FLOW_NAME, body: diagramPage(MAIN_FLOW_NAME, mainFlow(mainFlowProps)) },
+    { name: MAIN_FLOW_NAME, body: diagramPage(MAIN_FLOW_NAME, mainFlow(mainFlowProps).content) },
     {
       name: QUEUE_FLOW_NAME,
       body: diagramPage(QUEUE_FLOW_NAME, customerQueueFlow({
         dataTableId: 'table',
         holdMusicPromptArn: 'hold-music',
-      })),
+      }).content),
     },
     {
       name: ESCALATION_GUIDE_FLOW_NAME,
       body: diagramPage(ESCALATION_GUIDE_FLOW_NAME, escalationGuideFlow({
         detailViewArn: 'view',
-      })),
+      }).content),
     },
   ];
 }

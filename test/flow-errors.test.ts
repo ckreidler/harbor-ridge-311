@@ -78,9 +78,9 @@ const detailViewArn = 'arn:aws:connect:us-west-2:aws:view/detail:1';
 
 test('flow actions only use error branches their action type allows', () => {
   const flows = [
-    mainFlow(flowProps),
-    customerQueueFlow(queueProps),
-    escalationGuideFlow({ detailViewArn }),
+    mainFlow(flowProps).content,
+    customerQueueFlow(queueProps).content,
+    escalationGuideFlow({ detailViewArn }).content,
   ];
 
   for (const flow of flows) {
@@ -107,9 +107,9 @@ test('flow actions only use error branches their action type allows', () => {
 
 test('compare conditions do not use an empty-string operand', () => {
   const flows = [
-    mainFlow(flowProps),
-    customerQueueFlow(queueProps),
-    escalationGuideFlow({ detailViewArn }),
+    mainFlow(flowProps).content,
+    customerQueueFlow(queueProps).content,
+    escalationGuideFlow({ detailViewArn }).content,
   ];
   for (const flow of flows) {
     for (const action of flow.Actions) {
@@ -124,7 +124,7 @@ test('compare conditions do not use an empty-string operand', () => {
 });
 
 test('main flow looks up prompt text by channel and plays the greeting on success', () => {
-  const flow = mainFlow(flowProps);
+  const flow = mainFlow(flowProps).content;
   const block = (identifier: string) => {
     const found = flow.Actions.find((action) => action.Identifier === identifier);
     if (!found) {
@@ -189,7 +189,7 @@ test('main flow looks up prompt text by channel and plays the greeting on succes
 });
 
 test('in-hours escalation sets the agent guide before transferring to the queue', () => {
-  const flow = mainFlow(flowProps);
+  const flow = mainFlow(flowProps).content;
   const block = (identifier: string) => {
     const found = flow.Actions.find((action) => action.Identifier === identifier);
     if (!found) {
@@ -249,7 +249,7 @@ test('in-hours escalation sets the agent guide before transferring to the queue'
   expect(flow.Actions.filter((action) => action.Type === 'CreateWisdomSession')).toHaveLength(1);
   expect(block('create-assistant-session').Transitions.NextAction).toBe('select-orchestrator');
 
-  const guide = escalationGuideFlow({ detailViewArn });
+  const guide = escalationGuideFlow({ detailViewArn }).content;
   const show = guide.Actions.find((action) => action.Identifier === 'show-escalation');
   const view = JSON.stringify(show);
   expect(show?.Type).toBe('ShowView');
@@ -269,7 +269,7 @@ test('in-hours escalation sets the agent guide before transferring to the queue'
 });
 
 test('after-hours escalation creates a case, speaks the reference, and disconnects', () => {
-  const flow = mainFlow(flowProps);
+  const flow = mainFlow(flowProps).content;
   const block = (identifier: string) => {
     const found = flow.Actions.find((action) => action.Identifier === identifier);
     if (!found) {
@@ -415,7 +415,7 @@ test('after-hours escalation creates a case, speaks the reference, and disconnec
 });
 
 test('customer queue flow covers chat and voice', () => {
-  const flow = customerQueueFlow(queueProps);
+  const flow = customerQueueFlow(queueProps).content;
   const block = (identifier: string) => {
     const found = flow.Actions.find((action) => action.Identifier === identifier);
     if (!found) {
@@ -488,9 +488,9 @@ test('customer queue flow covers chat and voice', () => {
 
 test('wait actions use TimeLimitSeconds', () => {
   const flows = [
-    mainFlow(flowProps),
-    customerQueueFlow(queueProps),
-    escalationGuideFlow({ detailViewArn }),
+    mainFlow(flowProps).content,
+    customerQueueFlow(queueProps).content,
+    escalationGuideFlow({ detailViewArn }).content,
   ];
   const waits = flows.flatMap((flow) => flow.Actions.filter((action) => action.Type === 'Wait'));
   expect(waits.length).toBeGreaterThan(0);
@@ -506,7 +506,7 @@ test('wait actions use TimeLimitSeconds', () => {
       },
     ]);
   }
-  const queueWait = customerQueueFlow(queueProps).Actions.find((action) => action.Identifier === 'wait-in-queue');
+  const queueWait = customerQueueFlow(queueProps).content.Actions.find((action) => action.Identifier === 'wait-in-queue');
   expect(queueWait?.Parameters.TimeLimitSeconds).toBe('180');
   expect(queueWait?.Transitions.NextAction).toBe('wait-in-queue');
   expect(queueWait?.Transitions.Conditions?.[0].NextAction).toBe('wait-in-queue');

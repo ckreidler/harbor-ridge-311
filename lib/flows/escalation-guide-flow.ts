@@ -3,7 +3,7 @@ import {
   disconnectParticipant,
   flow,
   showView,
-  type FlowContent,
+  type CompiledFlow,
 } from '../flow';
 
 export interface EscalationGuideFlowProps {
@@ -19,7 +19,7 @@ const ESCALATION_FIELDS = [
   ['Sentiment', 'sentiment'],
 ] as const;
 
-export function escalationGuideFlow(props: EscalationGuideFlowProps): FlowContent {
+export function escalationGuideFlow(props: EscalationGuideFlowProps): CompiledFlow<typeof CONTACT_FLOW> {
   return flow({
     name: ESCALATION_GUIDE_FLOW_NAME,
     type: CONTACT_FLOW,
