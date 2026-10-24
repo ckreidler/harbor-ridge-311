@@ -480,6 +480,7 @@ export class ConnectStack extends cdk.Stack {
           },
         },
       });
+      agent.node.addDependency(tickets.target, tickets.application, tickets.applicationIntegration);
       const agentVersion = new wisdom.CfnAIAgentVersion(this, `${channel}OrchestrationAgentVersion`, {
         assistantId,
         aiAgentId: agent.attrAiAgentId,

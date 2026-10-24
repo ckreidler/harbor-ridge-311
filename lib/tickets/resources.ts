@@ -19,6 +19,7 @@ export interface TicketSystem {
   readonly lambdaArn: string;
   readonly gatewayIdentifier: string;
   readonly target: bedrockagentcore.CfnGatewayTarget;
+  readonly application: appintegrations.CfnApplication;
   readonly applicationIntegration: connect.CfnIntegrationAssociation;
   readonly lambdaIntegration: connect.CfnIntegrationAssociation;
 }
@@ -336,7 +337,7 @@ export function addTickets(stack: cdk.Stack, instanceArn: string, instanceId: st
     integrationType: 'APPLICATION',
     integrationArn: application.attrApplicationArn,
   });
-  applicationIntegration.node.addDependency(audience);
+  applicationIntegration.node.addDependency(audience, target);
   const lambdaIntegration = new connect.CfnIntegrationAssociation(stack, 'TicketLambdaIntegration', {
     instanceId: instanceArn,
     integrationType: 'LAMBDA_FUNCTION',
@@ -348,6 +349,7 @@ export function addTickets(stack: cdk.Stack, instanceArn: string, instanceId: st
     lambdaArn: ticketFunction.functionArn,
     gatewayIdentifier: gateway.attrGatewayIdentifier,
     target,
+    application,
     applicationIntegration,
     lambdaIntegration,
   };

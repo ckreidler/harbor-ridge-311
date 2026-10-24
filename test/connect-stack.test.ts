@@ -920,6 +920,30 @@ test('ConnectStack stores customer-scoped tickets behind an IAM API and a JWT ga
     Name: 'HarborRidge311Tickets',
     ApplicationType: 'MCP_SERVER',
   });
+  const ticketTargetId = Object.keys(template.findResources('AWS::BedrockAgentCore::GatewayTarget'))[0];
+  const ticketApplicationId = Object.keys(template.findResources('AWS::AppIntegrations::Application'))[0];
+  const ticketAssociationId = Object.entries(template.findResources('AWS::Connect::IntegrationAssociation')).find(([, resource]) => (
+    (resource as { Properties: { IntegrationType?: string } }).Properties.IntegrationType === 'APPLICATION'
+  ))?.[0];
+  expect(ticketTargetId).toBeDefined();
+  expect(ticketApplicationId).toBeDefined();
+  expect(ticketAssociationId).toBeDefined();
+  const ticketAssociation = template.findResources('AWS::Connect::IntegrationAssociation')[ticketAssociationId ?? ''] as {
+    DependsOn?: string | string[];
+  };
+  expect([ticketAssociation.DependsOn].flat()).toContain(ticketTargetId);
+  const orchestrationAgents = Object.values(template.findResources('AWS::Wisdom::AIAgent')) as Array<{
+    Properties: { Name?: string };
+    DependsOn?: string | string[];
+  }>;
+  for (const name of ['HarborRidge311-VoiceOrchestration', 'HarborRidge311-ChatOrchestration']) {
+    const agent = orchestrationAgents.find((resource) => resource.Properties.Name === name);
+    expect([agent?.DependsOn].flat()).toEqual(expect.arrayContaining([
+      ticketTargetId,
+      ticketApplicationId,
+      ticketAssociationId,
+    ]));
+  }
   template.hasResourceProperties('AWS::Connect::SecurityProfile', {
     SecurityProfileName: 'HarborRidge311-Orchestration',
     Applications: [{
