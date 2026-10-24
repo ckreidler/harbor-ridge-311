@@ -5,6 +5,7 @@ export type ActionType =
   | 'UpdateContactTextToSpeechVoice'
   | 'EvaluateDataTableValues'
   | 'MessageParticipant'
+  | 'MessageParticipantIteratively'
   | 'CreateWisdomSession'
   | 'InvokeLambdaFunction'
   | 'ConnectParticipantWithLexBot'
@@ -17,6 +18,7 @@ export type ActionType =
   | 'CreateCase'
   | 'GetCase'
   | 'Wait'
+  | 'ShowView'
   | 'DisconnectParticipant';
 
 export interface ConditionBranch {
@@ -45,7 +47,23 @@ export interface TerminalAction {
   readonly parameters: { readonly [name: string]: Json };
 }
 
-export type FlowAction = ContinuingAction | TerminalAction;
+type Action<T extends Exclude<ActionType, 'DisconnectParticipant'>> =
+  ContinuingAction & { readonly type: T };
+
+export type FlowAction =
+  | { [T in Exclude<ActionType, 'DisconnectParticipant'>]: Action<T> }[Exclude<ActionType, 'DisconnectParticipant'>]
+  | TerminalAction;
+
+export type CustomerQueueActionType =
+  | 'Compare'
+  | 'EvaluateDataTableValues'
+  | 'MessageParticipant'
+  | 'MessageParticipantIteratively'
+  | 'Wait';
+
+export type CustomerQueueAction = Extract<FlowAction, { readonly type: CustomerQueueActionType }>;
+
+export type InboundContactAction = Exclude<FlowAction, { readonly type: 'MessageParticipantIteratively' }>;
 
 export interface Branches {
   readonly next: string;
@@ -74,12 +92,12 @@ function onError(to: string): ErrorBranch[] {
   return [{ error: 'NoMatchingError', to }];
 }
 
-function simple(
+function simple<T extends Exclude<ActionType, 'DisconnectParticipant'>>(
   key: string,
-  type: Exclude<ActionType, 'DisconnectParticipant'>,
+  type: T,
   parameters: ContinuingAction['parameters'],
   { next, error }: Branches,
-): ContinuingAction {
+): Action<T> {
   return { key, type, parameters, next, conditions: [], errors: onError(error) };
 }
 
@@ -87,7 +105,7 @@ export function updateFlowLoggingBehavior(
   key: string,
   parameters: { readonly FlowLoggingBehavior: 'Enabled' | 'Disabled' },
   { next }: { readonly next: string },
-): FlowAction {
+): Action<'UpdateFlowLoggingBehavior'> {
   return { key, type: 'UpdateFlowLoggingBehavior', parameters, next, conditions: [], errors: [] };
 }
 
@@ -98,7 +116,7 @@ export function updateContactTextToSpeechVoice(
     readonly TextToSpeechEngine: 'Standard' | 'Neural' | 'Generative';
   },
   branches: Branches,
-): FlowAction {
+): Action<'UpdateContactTextToSpeechVoice'> {
   return simple(key, 'UpdateContactTextToSpeechVoice', parameters, branches);
 }
 
@@ -106,7 +124,7 @@ export function evaluateDataTableValues(
   key: string,
   parameters: { readonly DataTableId: string; readonly Queries: readonly DataTableQuery[] },
   branches: Branches,
-): FlowAction {
+): Action<'EvaluateDataTableValues'> {
   return simple(key, 'EvaluateDataTableValues', parameters, branches);
 }
 
@@ -114,7 +132,7 @@ export function messageParticipant(
   key: string,
   parameters: { readonly Text: string } | { readonly SSML: string },
   branches: Branches,
-): FlowAction {
+): Action<'MessageParticipant'> {
   return simple(key, 'MessageParticipant', parameters, branches);
 }
 
@@ -122,7 +140,7 @@ export function createWisdomSession(
   key: string,
   parameters: { readonly WisdomAssistantArn: string },
   branches: Branches,
-): FlowAction {
+): Action<'CreateWisdomSession'> {
   return simple(key, 'CreateWisdomSession', parameters, branches);
 }
 
@@ -134,7 +152,7 @@ export function invokeLambdaFunction(
     readonly LambdaInvocationAttributes?: { readonly [name: string]: string };
   },
   branches: Branches,
-): FlowAction {
+): Action<'InvokeLambdaFunction'> {
   return simple(key, 'InvokeLambdaFunction', parameters, branches);
 }
 
@@ -151,7 +169,7 @@ export function connectParticipantWithLexBot(
     readonly noMatch: string;
     readonly error: string;
   },
-): FlowAction {
+): Action<'ConnectParticipantWithLexBot'> {
   return {
     key,
     type: 'ConnectParticipantWithLexBot',
@@ -174,7 +192,7 @@ export function compare(
     readonly conditions: readonly [ConditionBranch, ...ConditionBranch[]];
     readonly noMatch: string;
   },
-): FlowAction {
+): Action<'Compare'> {
   return {
     key,
     type: 'Compare',
@@ -192,7 +210,7 @@ export function updateContactAttributes(
     readonly TargetContact: 'Current' | 'Related';
   },
   branches: Branches,
-): FlowAction {
+): Action<'UpdateContactAttributes'> {
   return simple(key, 'UpdateContactAttributes', parameters, branches);
 }
 
@@ -205,7 +223,7 @@ export function checkHoursOfOperation(
     readonly outOfHours: string;
     readonly error: string;
   },
-): FlowAction {
+): Action<'CheckHoursOfOperation'> {
   return {
     key,
     type: 'CheckHoursOfOperation',
@@ -220,7 +238,7 @@ export function updateContactEventHooks(
   key: string,
   parameters: { readonly EventHooks: EventHooks },
   branches: Branches,
-): FlowAction {
+): Action<'UpdateContactEventHooks'> {
   return simple(key, 'UpdateContactEventHooks', parameters, branches);
 }
 
@@ -228,7 +246,7 @@ export function updateContactTargetQueue(
   key: string,
   parameters: { readonly QueueId: string },
   branches: Branches,
-): FlowAction {
+): Action<'UpdateContactTargetQueue'> {
   return simple(key, 'UpdateContactTargetQueue', parameters, branches);
 }
 
@@ -239,7 +257,7 @@ export function transferContactToQueue(
     readonly atCapacity: string;
     readonly error: string;
   },
-): FlowAction {
+): Action<'TransferContactToQueue'> {
   return {
     key,
     type: 'TransferContactToQueue',
@@ -265,7 +283,7 @@ export function createCase(
     readonly notLinked: string;
     readonly error: string;
   },
-): FlowAction {
+): Action<'CreateCase'> {
   return {
     key,
     type: 'CreateCase',
@@ -293,7 +311,7 @@ export function getCase(
     readonly noneFound: string;
     readonly multipleFound: string;
   },
-): FlowAction {
+): Action<'GetCase'> {
   return {
     key,
     type: 'GetCase',
@@ -316,7 +334,7 @@ export function wait(
     readonly completed: string;
     readonly error: string;
   },
-): FlowAction {
+): Action<'Wait'> {
   return {
     key,
     type: 'Wait',
@@ -324,6 +342,58 @@ export function wait(
     next,
     conditions: [equals('WaitCompleted', completed)],
     errors: onError(error),
+  };
+}
+
+export type IterativeMessage =
+  | { readonly Text: string }
+  | { readonly SSML: string }
+  | { readonly PromptId: string };
+
+export function messageParticipantIteratively(
+  key: string,
+  parameters: { readonly Messages: readonly IterativeMessage[] },
+  { next }: { readonly next: string },
+): Action<'MessageParticipantIteratively'> {
+  return {
+    key,
+    type: 'MessageParticipantIteratively',
+    parameters,
+    next,
+    conditions: [],
+    errors: [],
+  };
+}
+
+export function showView(
+  key: string,
+  parameters: {
+    readonly ViewResource: { readonly Id: string };
+    readonly InvocationTimeLimitSeconds: string;
+    readonly ViewData: {
+      readonly Heading: string;
+      readonly AttributeBar: readonly { readonly Label: string; readonly Value: string }[];
+      readonly Back: { readonly Label: string };
+    };
+  },
+  { next, error, noMatch, timeLimit }: {
+    readonly next: string;
+    readonly error: string;
+    readonly noMatch: string;
+    readonly timeLimit: string;
+  },
+): Action<'ShowView'> {
+  return {
+    key,
+    type: 'ShowView',
+    parameters,
+    next,
+    conditions: [],
+    errors: [
+      { error: 'NoMatchingError', to: error },
+      { error: 'NoMatchingCondition', to: noMatch },
+      { error: 'TimeLimitExceeded', to: timeLimit },
+    ],
   };
 }
 

@@ -16,7 +16,7 @@ import * as wisdom from 'aws-cdk-lib/aws-wisdom';
 import * as cdk from 'aws-cdk-lib/core';
 import * as cr from 'aws-cdk-lib/custom-resources';
 import { Construct } from 'constructs';
-import { escalationGuideFlow } from './flows/escalation-guide-flow';
+import { ESCALATION_GUIDE_FLOW_NAME, escalationGuideFlow } from './flows/escalation-guide-flow';
 import {
   AFTER_HOURS_CASE_CHAT_TEXT,
   AFTER_HOURS_CASE_TEXT_AFTER,
@@ -24,7 +24,7 @@ import {
   MAIN_FLOW_NAME,
   mainFlow,
 } from './flows/main-flow';
-import { customerQueueFlow, QUEUE_CHAT_TEXT, QUEUE_VOICE_TEXT } from './flows/queue-flow';
+import { customerQueueFlow, QUEUE_CHAT_TEXT, QUEUE_FLOW_NAME, QUEUE_VOICE_TEXT } from './flows/queue-flow';
 import { ORCHESTRATION_MODEL_ID, orchestrationPrompt } from './orchestration-prompt';
 import { SELF_SERVICE_USE_CASE } from './select-orchestrator';
 
@@ -891,7 +891,7 @@ export class ConnectStack extends cdk.Stack {
 
     const queueFlow = new connect.CfnContactFlow(this, 'QueueFlow', {
       instanceArn,
-      name: 'HarborRidge311-Queue',
+      name: QUEUE_FLOW_NAME,
       type: 'CUSTOMER_QUEUE',
       content: cdk.Fn.toJsonString(customerQueueFlow({
         dataTableId,
@@ -909,7 +909,7 @@ export class ConnectStack extends cdk.Stack {
 
     const escalationGuide = new connect.CfnContactFlow(this, 'EscalationGuide', {
       instanceArn,
-      name: 'HarborRidge311-EscalationGuide',
+      name: ESCALATION_GUIDE_FLOW_NAME,
       type: 'CONTACT_FLOW',
       content: cdk.Fn.toJsonString(escalationGuideFlow({
         detailViewArn: cdk.Fn.join('', [

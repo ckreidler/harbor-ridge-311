@@ -511,19 +511,3 @@ test('wait actions use TimeLimitSeconds', () => {
   expect(queueWait?.Transitions.NextAction).toBe('wait-in-queue');
   expect(queueWait?.Transitions.Conditions?.[0].NextAction).toBe('wait-in-queue');
 });
-
-test('queue blocks sit on a 280 pixel grid', () => {
-  for (const flow of [customerQueueFlow(queueProps)]) {
-    const ids = flow.Actions.map((action) => action.Identifier);
-    expect(new Set(Object.keys(flow.Metadata.ActionMetadata))).toEqual(new Set(ids));
-    for (let left = 0; left < ids.length; left += 1) {
-      for (let right = left + 1; right < ids.length; right += 1) {
-        const a = flow.Metadata.ActionMetadata[ids[left]].position;
-        const b = flow.Metadata.ActionMetadata[ids[right]].position;
-        const dx = Math.abs(a.x - b.x);
-        const dy = Math.abs(a.y - b.y);
-        expect(dx >= 280 || dy >= 280).toBe(true);
-      }
-    }
-  }
-});

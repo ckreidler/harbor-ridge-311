@@ -2,7 +2,9 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as cdk from 'aws-cdk-lib/core';
 import { disconnectParticipant, flow, messageParticipant } from '../lib/flow';
+import { escalationGuideFlow } from '../lib/flows/escalation-guide-flow';
 import { mainFlow } from '../lib/flows/main-flow';
+import { customerQueueFlow } from '../lib/flows/queue-flow';
 
 const flowProps = {
   dataTableId: 'table',
@@ -17,16 +19,31 @@ const flowProps = {
   requestCategoryFieldId: '137be1e8-7eac-4741-9a3b-18aedbdcf77b',
 };
 
-test('builder MainFlow matches the hand-written flow except Metadata', () => {
+function matchesFixture(built: unknown, fixture: string): void {
   const handWritten = JSON.parse(fs.readFileSync(
-    path.join(__dirname, 'fixtures/main-flow-0966293.json'),
+    path.join(__dirname, 'fixtures', fixture),
     'utf8',
   )) as { Metadata: unknown };
   const { Metadata, ...body } = handWritten;
-  const built = mainFlow(flowProps);
-
   expect(Metadata).toBeDefined();
   expect(built).toEqual(body);
+}
+
+test('builder MainFlow matches the hand-written flow except Metadata', () => {
+  matchesFixture(mainFlow(flowProps), 'main-flow-0966293.json');
+});
+
+test('builder customer queue flow matches the hand-written flow except Metadata', () => {
+  matchesFixture(customerQueueFlow({
+    dataTableId: 'table',
+    holdMusicPromptArn: 'hold-music',
+  }), 'queue-flow-0966293.json');
+});
+
+test('builder escalation guide matches the hand-written flow except Metadata', () => {
+  matchesFixture(escalationGuideFlow({
+    detailViewArn: 'arn:aws:connect:us-west-2:aws:view/detail:1',
+  }), 'escalation-guide-flow-0966293.json');
 });
 
 test('action identifiers are the action keys and stay stable across compiles', () => {

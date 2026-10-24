@@ -21,6 +21,7 @@ import {
   wait,
   type DataTableQuery,
   type FlowContent,
+  type InboundContactAction,
 } from '../flow';
 
 export interface MainFlowProps {
@@ -273,6 +274,6 @@ export function mainFlow(props: MainFlowProps): FlowContent {
         Text: `${VOICE_GREETING} ${VOICE_GOODBYE}`,
       }, { next: 'disconnect', error: 'disconnect' }),
       disconnectParticipant('disconnect'),
-    ],
+    ] satisfies readonly InboundContactAction[],
   });
 }

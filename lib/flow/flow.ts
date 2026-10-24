@@ -115,7 +115,11 @@ function transitions(action: FlowAction): FlowTransitions {
     return {};
   }
   const NextAction = action.next;
-  if (action.conditions.length === 0 && action.errors.length === 0) {
+  if (
+    action.conditions.length === 0
+    && action.errors.length === 0
+    && action.type !== 'MessageParticipantIteratively'
+  ) {
     return { NextAction };
   }
   return {
