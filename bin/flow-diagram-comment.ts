@@ -179,7 +179,10 @@ async function snapshotsAt(sha: string): Promise<FlowSnapshot[]> {
   if (resolved === revision('HEAD')) return loadFlowSnapshots(repoRoot());
   const worktree = path.join(os.tmpdir(), `flow-diagrams-${resolved}`);
   clearWorktree(worktree);
-  execFileSync('git', ['worktree', 'add', '--detach', worktree, resolved], { cwd: repoRoot(), stdio: 'inherit' });
+  execFileSync('git', ['worktree', 'add', '--detach', worktree, resolved], {
+    cwd: repoRoot(),
+    stdio: ['ignore', 'ignore', 'inherit'],
+  });
   try {
     ensureDependencies(worktree);
     return await loadFlowSnapshots(worktree);
