@@ -27,7 +27,7 @@ import { customerQueueFlow, QUEUE_CHAT_TEXT, QUEUE_FLOW_NAME, QUEUE_VOICE_TEXT }
 import { ORCHESTRATION_MODEL_ID, orchestrationPrompt } from './orchestration-prompt';
 import { SELF_SERVICE_USE_CASE } from './select-orchestrator';
 import { addTickets } from './tickets/resources';
-import { TICKET_OPERATIONS, ticketToolId, type TicketOperation } from './tickets/tools';
+import { TICKET_OPERATIONS, ticketToolId } from './tickets/tools';
 
 export const SANDBOX_PARAMETER_PREFIX = '/connect/sandbox';
 export const MAIN_CONTACT_FLOW_ID_PARAMETER = `${SANDBOX_PARAMETER_PREFIX}/harbor-ridge-311/main-contact-flow-id`;
@@ -87,28 +87,7 @@ function templateOverride(
   };
 }
 
-function ticketTool(
-  operation: TicketOperation,
-  description: string,
-  instruction: string,
-  overrides: wisdom.CfnAIAgent.ToolOverrideInputValueProperty[],
-): wisdom.CfnAIAgent.ToolConfigurationProperty {
-  return {
-    toolName: operation,
-    toolType: 'MODEL_CONTEXT_PROTOCOL',
-    toolId: ticketToolId(operation),
-    description,
-    instruction: { instruction },
-    overrideInputValues: overrides,
-  };
-}
-
-function orchestrationTools(channel: 'VOICE' | 'CHAT'): wisdom.CfnAIAgent.ToolConfigurationProperty[] {
-  const identity = [
-    templateOverride('$.contactId', '{{$.contactId}}'),
-    templateOverride('$.instanceId', '{{$.instanceId}}'),
-    templateOverride('$.customerId', '{{$.Custom.customerId}}'),
-  ];
+function orchestrationTools(): wisdom.CfnAIAgent.ToolConfigurationProperty[] {
   return [
     {
       toolName: 'Complete',
@@ -192,36 +171,6 @@ function orchestrationTools(channel: 'VOICE' | 'CHAT'): wisdom.CfnAIAgent.ToolCo
         ),
       ],
     },
-    ticketTool(
-      'listMyTickets',
-      'List this caller\'s Harbor Ridge 311 tickets, newest first.',
-      'Call listMyTickets when the caller asks about an existing request. Do not pass customerId, contactId, or instanceId.',
-      identity,
-    ),
-    ticketTool(
-      'getTicket',
-      'Read one Harbor Ridge 311 ticket by its ticket id.',
-      'Call getTicket with the ticket id the caller gave you or that listMyTickets returned. A ticket id looks like HR- followed by six letters or numbers. Do not pass customerId, contactId, or instanceId.',
-      identity,
-    ),
-    ticketTool(
-      'createTicket',
-      'Open a Harbor Ridge 311 ticket for this caller.',
-      'Call createTicket when the caller wants a new trash-pickup, pothole, parking-permit, or other request. Use their words for the subject and description. Do not pass customerId, contactId, instanceId, or channel.',
-      [...identity, templateOverride('$.channel', channel)],
-    ),
-    ticketTool(
-      'updateTicket',
-      'Change a ticket description or category, or add a note.',
-      'Call updateTicket with the ticket id and at least one of description, category, or note. Do not pass customerId, contactId, or instanceId.',
-      identity,
-    ),
-    ticketTool(
-      'closeTicket',
-      'Close a Harbor Ridge 311 ticket.',
-      'Call closeTicket only after the caller confirms which ticket to close. Do not pass customerId, contactId, or instanceId.',
-      identity,
-    ),
   ];
 }
 
@@ -476,7 +425,7 @@ export class ConnectStack extends cdk.Stack {
             locale: 'en_US',
             orchestrationAiGuardrailId: guardrailVersion.attrAiGuardrailVersionId,
             orchestrationAiPromptId: promptVersion.attrAiPromptVersionId,
-            toolConfigurations: orchestrationTools(channel === 'Voice' ? 'VOICE' : 'CHAT'),
+            toolConfigurations: orchestrationTools(),
           },
         },
       });

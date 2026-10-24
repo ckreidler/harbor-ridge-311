@@ -1014,11 +1014,16 @@ test('ConnectStack stores customer-scoped tickets behind an IAM API and a JWT ga
   }>;
   for (const name of ['HarborRidge311-VoiceOrchestration', 'HarborRidge311-ChatOrchestration']) {
     const agent = orchestrationAgents.find((resource) => resource.Properties.Name === name);
-    expect([agent?.DependsOn].flat()).toEqual(expect.arrayContaining([
+    const dependencies = [agent?.DependsOn].flat();
+    expect(dependencies).toEqual(expect.arrayContaining([
       ticketTargetId,
       ticketApplicationId,
       ticketAssociationId,
     ]));
+    expect(dependencies.some((dependency) => dependency?.includes('SecurityProfile'))).toBe(false);
+    expect(JSON.stringify(agent)).not.toContain('Tickets___');
+    expect(JSON.stringify(agent)).not.toContain('listMyTickets');
+    expect(JSON.stringify(agent)).not.toContain('createTicket');
   }
   template.hasResourceProperties('AWS::Connect::SecurityProfile', {
     SecurityProfileName: 'HarborRidge311-Orchestration',
