@@ -1,0 +1,1053 @@
+{
+  "Version": "2019-10-30",
+  "StartAction": "enable-flow-logging",
+  "Metadata": {
+    "entryPointPosition": {
+      "x": 40,
+      "y": 360
+    },
+    "ActionMetadata": {
+      "enable-flow-logging": {
+        "position": {
+          "x": 160,
+          "y": 360
+        }
+      },
+      "set-en-voice": {
+        "position": {
+          "x": 440,
+          "y": 360
+        }
+      },
+      "lookup-prompts": {
+        "position": {
+          "x": 720,
+          "y": 360
+        }
+      },
+      "play-greeting": {
+        "position": {
+          "x": 1000,
+          "y": 360
+        }
+      },
+      "play-fallback": {
+        "position": {
+          "x": 1000,
+          "y": 640
+        }
+      },
+      "create-assistant-session": {
+        "position": {
+          "x": 1280,
+          "y": 360
+        }
+      },
+      "select-orchestrator": {
+        "position": {
+          "x": 1560,
+          "y": 360
+        }
+      },
+      "ask-en-question": {
+        "position": {
+          "x": 1840,
+          "y": 360
+        }
+      },
+      "check-tool": {
+        "position": {
+          "x": 2120,
+          "y": 360
+        }
+      },
+      "play-goodbye": {
+        "position": {
+          "x": 2400,
+          "y": 80
+        }
+      },
+      "set-escalation": {
+        "position": {
+          "x": 2400,
+          "y": 640
+        }
+      },
+      "check-hours": {
+        "position": {
+          "x": 2680,
+          "y": 640
+        }
+      },
+      "set-event-flow": {
+        "position": {
+          "x": 2960,
+          "y": 640
+        }
+      },
+      "set-working-queue": {
+        "position": {
+          "x": 3240,
+          "y": 640
+        }
+      },
+      "set-customer-queue": {
+        "position": {
+          "x": 3520,
+          "y": 640
+        }
+      },
+      "transfer-to-queue": {
+        "position": {
+          "x": 3800,
+          "y": 640
+        }
+      },
+      "check-case-title": {
+        "position": {
+          "x": 3240,
+          "y": 920
+        }
+      },
+      "set-case-title": {
+        "position": {
+          "x": 3520,
+          "y": 920
+        }
+      },
+      "set-fallback-title": {
+        "position": {
+          "x": 3520,
+          "y": 1200
+        }
+      },
+      "create-case": {
+        "position": {
+          "x": 3800,
+          "y": 920
+        }
+      },
+      "create-case-other": {
+        "position": {
+          "x": 3800,
+          "y": 1200
+        }
+      },
+      "get-case": {
+        "position": {
+          "x": 4080,
+          "y": 920
+        }
+      },
+      "branch-case-hold": {
+        "position": {
+          "x": 4080,
+          "y": 1200
+        }
+      },
+      "play-case-hold-chat": {
+        "position": {
+          "x": 4360,
+          "y": 1200
+        }
+      },
+      "wait-case": {
+        "position": {
+          "x": 4640,
+          "y": 1200
+        }
+      },
+      "get-case-retry": {
+        "position": {
+          "x": 4920,
+          "y": 1200
+        }
+      },
+      "play-case-hold-voice": {
+        "position": {
+          "x": 4360,
+          "y": 1480
+        }
+      },
+      "lookup-after-hours-case": {
+        "position": {
+          "x": 4360,
+          "y": 920
+        }
+      },
+      "check-case-prompt": {
+        "position": {
+          "x": 4640,
+          "y": 920
+        }
+      },
+      "check-reference": {
+        "position": {
+          "x": 4920,
+          "y": 920
+        }
+      },
+      "branch-case-channel": {
+        "position": {
+          "x": 5200,
+          "y": 920
+        }
+      },
+      "play-case-chat": {
+        "position": {
+          "x": 5480,
+          "y": 920
+        }
+      },
+      "play-case-voice": {
+        "position": {
+          "x": 5480,
+          "y": 1200
+        }
+      },
+      "play-closed": {
+        "position": {
+          "x": 3240,
+          "y": 1200
+        }
+      },
+      "disconnect": {
+        "position": {
+          "x": 3240,
+          "y": 360
+        }
+      }
+    }
+  },
+  "Actions": [
+    {
+      "Identifier": "enable-flow-logging",
+      "Type": "UpdateFlowLoggingBehavior",
+      "Parameters": {
+        "FlowLoggingBehavior": "Enabled"
+      },
+      "Transitions": {
+        "NextAction": "set-en-voice"
+      }
+    },
+    {
+      "Identifier": "set-en-voice",
+      "Type": "UpdateContactTextToSpeechVoice",
+      "Parameters": {
+        "TextToSpeechVoice": "Joanna",
+        "TextToSpeechEngine": "Neural"
+      },
+      "Transitions": {
+        "NextAction": "lookup-prompts",
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "lookup-prompts"
+          }
+        ],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "lookup-prompts",
+      "Type": "EvaluateDataTableValues",
+      "Parameters": {
+        "DataTableId": "table",
+        "Queries": [
+          {
+            "QueryName": "Greeting",
+            "Attributes": [
+              "Text"
+            ],
+            "PrimaryValues": [
+              {
+                "AttributeName": "Prompt",
+                "Value": "Greeting"
+              },
+              {
+                "AttributeName": "Channel",
+                "Value": "$.Channel"
+              }
+            ]
+          },
+          {
+            "QueryName": "Goodbye",
+            "Attributes": [
+              "Text"
+            ],
+            "PrimaryValues": [
+              {
+                "AttributeName": "Prompt",
+                "Value": "Goodbye"
+              },
+              {
+                "AttributeName": "Channel",
+                "Value": "$.Channel"
+              }
+            ]
+          },
+          {
+            "QueryName": "Question",
+            "Attributes": [
+              "Text"
+            ],
+            "PrimaryValues": [
+              {
+                "AttributeName": "Prompt",
+                "Value": "Question"
+              },
+              {
+                "AttributeName": "Channel",
+                "Value": "$.Channel"
+              }
+            ]
+          }
+        ]
+      },
+      "Transitions": {
+        "NextAction": "play-greeting",
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "play-fallback"
+          }
+        ],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "play-greeting",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "$.DataTables.Greeting.Text"
+      },
+      "Transitions": {
+        "NextAction": "create-assistant-session",
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "play-fallback"
+          }
+        ],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "create-assistant-session",
+      "Type": "CreateWisdomSession",
+      "Parameters": {
+        "WisdomAssistantArn": "assistant"
+      },
+      "Transitions": {
+        "NextAction": "select-orchestrator",
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "play-goodbye"
+          }
+        ],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "select-orchestrator",
+      "Type": "InvokeLambdaFunction",
+      "Parameters": {
+        "LambdaFunctionARN": "orchestrator",
+        "InvocationTimeLimitSeconds": "8",
+        "LambdaInvocationAttributes": {
+          "sessionArn": "$.Wisdom.SessionArn"
+        }
+      },
+      "Transitions": {
+        "NextAction": "ask-en-question",
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "ask-en-question"
+          }
+        ],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "ask-en-question",
+      "Type": "ConnectParticipantWithLexBot",
+      "Parameters": {
+        "Text": "$.DataTables.Question.Text",
+        "LexV2Bot": {
+          "AliasArn": "alias"
+        },
+        "LexSessionAttributes": {
+          "x-amz-lex:q-in-connect:session-arn": "$.Wisdom.SessionArn"
+        }
+      },
+      "Transitions": {
+        "NextAction": "check-hours",
+        "Errors": [
+          {
+            "ErrorType": "InputTimeLimitExceeded",
+            "NextAction": "check-hours"
+          },
+          {
+            "ErrorType": "NoMatchingCondition",
+            "NextAction": "check-tool"
+          },
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "check-hours"
+          }
+        ],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "check-tool",
+      "Type": "Compare",
+      "Parameters": {
+        "ComparisonValue": "$.Lex.SessionAttributes.Tool"
+      },
+      "Transitions": {
+        "NextAction": "play-goodbye",
+        "Conditions": [
+          {
+            "NextAction": "play-goodbye",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": [
+                "Complete"
+              ]
+            }
+          },
+          {
+            "NextAction": "set-escalation",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": [
+                "Escalate"
+              ]
+            }
+          }
+        ],
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingCondition",
+            "NextAction": "check-hours"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "set-escalation",
+      "Type": "UpdateContactAttributes",
+      "Parameters": {
+        "Attributes": {
+          "escalationReason": "$.Lex.SessionAttributes.escalationReason",
+          "escalationSummary": "$.Lex.SessionAttributes.escalationSummary",
+          "customerIntent": "$.Lex.SessionAttributes.customerIntent",
+          "sentiment": "$.Lex.SessionAttributes.sentiment"
+        },
+        "TargetContact": "Current"
+      },
+      "Transitions": {
+        "NextAction": "check-hours",
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "check-hours"
+          }
+        ],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "check-hours",
+      "Type": "CheckHoursOfOperation",
+      "Parameters": {
+        "HoursOfOperationId": "hours"
+      },
+      "Transitions": {
+        "NextAction": "set-event-flow",
+        "Conditions": [
+          {
+            "NextAction": "set-event-flow",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": [
+                "True"
+              ]
+            }
+          },
+          {
+            "NextAction": "check-case-title",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": [
+                "False"
+              ]
+            }
+          }
+        ],
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "check-case-title"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "set-event-flow",
+      "Type": "UpdateContactEventHooks",
+      "Parameters": {
+        "EventHooks": {
+          "DefaultAgentUI": "escalation-guide"
+        }
+      },
+      "Transitions": {
+        "NextAction": "set-working-queue",
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "play-goodbye"
+          }
+        ],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "set-working-queue",
+      "Type": "UpdateContactTargetQueue",
+      "Parameters": {
+        "QueueId": "queue"
+      },
+      "Transitions": {
+        "NextAction": "set-customer-queue",
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "play-goodbye"
+          }
+        ],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "set-customer-queue",
+      "Type": "UpdateContactEventHooks",
+      "Parameters": {
+        "EventHooks": {
+          "CustomerQueue": "queue-flow"
+        }
+      },
+      "Transitions": {
+        "NextAction": "transfer-to-queue",
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "transfer-to-queue"
+          }
+        ],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "transfer-to-queue",
+      "Type": "TransferContactToQueue",
+      "Parameters": {},
+      "Transitions": {
+        "NextAction": "play-goodbye",
+        "Errors": [
+          {
+            "ErrorType": "QueueAtCapacity",
+            "NextAction": "play-goodbye"
+          },
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "play-goodbye"
+          }
+        ],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "check-case-title",
+      "Type": "Compare",
+      "Parameters": {
+        "ComparisonValue": "$.Attributes.customerIntent"
+      },
+      "Transitions": {
+        "NextAction": "set-fallback-title",
+        "Conditions": [
+          {
+            "NextAction": "set-case-title",
+            "Condition": {
+              "Operator": "Exists",
+              "Operands": []
+            }
+          }
+        ],
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingCondition",
+            "NextAction": "set-fallback-title"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "set-case-title",
+      "Type": "UpdateContactAttributes",
+      "Parameters": {
+        "Attributes": {
+          "caseTitle": "$.Attributes.customerIntent"
+        },
+        "TargetContact": "Current"
+      },
+      "Transitions": {
+        "NextAction": "create-case",
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "set-fallback-title"
+          }
+        ],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "set-fallback-title",
+      "Type": "UpdateContactAttributes",
+      "Parameters": {
+        "Attributes": {
+          "caseTitle": "After-hours escalation"
+        },
+        "TargetContact": "Current"
+      },
+      "Transitions": {
+        "NextAction": "create-case",
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "play-closed"
+          }
+        ],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "create-case",
+      "Type": "CreateCase",
+      "Parameters": {
+        "LinkContactToCase": "true",
+        "CaseTemplateId": "template",
+        "CaseRequestFields": {
+          "title": "$.Attributes.caseTitle",
+          "summary": "$.Attributes.escalationSummary",
+          "case_reason": "$.Attributes.escalationReason",
+          "137be1e8-7eac-4741-9a3b-18aedbdcf77b": "other",
+          "status": "open"
+        }
+      },
+      "Transitions": {
+        "NextAction": "get-case",
+        "Errors": [
+          {
+            "ErrorType": "ContactNotLinked",
+            "NextAction": "get-case"
+          },
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "create-case-other"
+          }
+        ],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "create-case-other",
+      "Type": "CreateCase",
+      "Parameters": {
+        "LinkContactToCase": "true",
+        "CaseTemplateId": "template",
+        "CaseRequestFields": {
+          "title": "$.Attributes.caseTitle",
+          "summary": "$.Attributes.escalationSummary",
+          "case_reason": "other",
+          "137be1e8-7eac-4741-9a3b-18aedbdcf77b": "other",
+          "status": "open"
+        }
+      },
+      "Transitions": {
+        "NextAction": "get-case",
+        "Errors": [
+          {
+            "ErrorType": "ContactNotLinked",
+            "NextAction": "get-case"
+          },
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "play-closed"
+          }
+        ],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "get-case",
+      "Type": "GetCase",
+      "Parameters": {
+        "LinkContactToCase": "false",
+        "GetLastUpdatedCase": "true",
+        "CaseRequestFields": {
+          "case_id": "$.Case.case_id"
+        },
+        "CaseResponseFields": [
+          "reference_number"
+        ]
+      },
+      "Transitions": {
+        "NextAction": "lookup-after-hours-case",
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "branch-case-hold"
+          },
+          {
+            "ErrorType": "NoneFound",
+            "NextAction": "branch-case-hold"
+          },
+          {
+            "ErrorType": "MultipleFound",
+            "NextAction": "branch-case-hold"
+          }
+        ],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "branch-case-hold",
+      "Type": "Compare",
+      "Parameters": {
+        "ComparisonValue": "$.Channel"
+      },
+      "Transitions": {
+        "NextAction": "play-case-hold-voice",
+        "Conditions": [
+          {
+            "NextAction": "play-case-hold-chat",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": [
+                "CHAT"
+              ]
+            }
+          }
+        ],
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingCondition",
+            "NextAction": "play-case-hold-voice"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "play-case-hold-chat",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "One moment while we log your request."
+      },
+      "Transitions": {
+        "NextAction": "wait-case",
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "wait-case"
+          }
+        ],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "wait-case",
+      "Type": "Wait",
+      "Parameters": {
+        "TimeLimitSeconds": "3"
+      },
+      "Transitions": {
+        "NextAction": "get-case-retry",
+        "Conditions": [
+          {
+            "NextAction": "get-case-retry",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": [
+                "WaitCompleted"
+              ]
+            }
+          }
+        ],
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "get-case-retry"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "play-case-hold-voice",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "SSML": "<speak>One moment while we log your request.<break time=\"2s\"/></speak>"
+      },
+      "Transitions": {
+        "NextAction": "get-case-retry",
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "get-case-retry"
+          }
+        ],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "get-case-retry",
+      "Type": "GetCase",
+      "Parameters": {
+        "LinkContactToCase": "false",
+        "GetLastUpdatedCase": "true",
+        "CaseRequestFields": {
+          "case_id": "$.Case.case_id"
+        },
+        "CaseResponseFields": [
+          "reference_number"
+        ]
+      },
+      "Transitions": {
+        "NextAction": "lookup-after-hours-case",
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "play-closed"
+          },
+          {
+            "ErrorType": "NoneFound",
+            "NextAction": "play-closed"
+          },
+          {
+            "ErrorType": "MultipleFound",
+            "NextAction": "play-closed"
+          }
+        ],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "lookup-after-hours-case",
+      "Type": "EvaluateDataTableValues",
+      "Parameters": {
+        "DataTableId": "table",
+        "Queries": [
+          {
+            "QueryName": "AfterHoursCase",
+            "Attributes": [
+              "Text",
+              "TextAfter"
+            ],
+            "PrimaryValues": [
+              {
+                "AttributeName": "Prompt",
+                "Value": "AfterHoursCase"
+              },
+              {
+                "AttributeName": "Channel",
+                "Value": "$.Channel"
+              }
+            ]
+          }
+        ]
+      },
+      "Transitions": {
+        "NextAction": "check-case-prompt",
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "play-closed"
+          }
+        ],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "check-case-prompt",
+      "Type": "Compare",
+      "Parameters": {
+        "ComparisonValue": "$.DataTables.AfterHoursCase.Text"
+      },
+      "Transitions": {
+        "NextAction": "play-closed",
+        "Conditions": [
+          {
+            "NextAction": "check-reference",
+            "Condition": {
+              "Operator": "Exists",
+              "Operands": []
+            }
+          }
+        ],
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingCondition",
+            "NextAction": "play-closed"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "check-reference",
+      "Type": "Compare",
+      "Parameters": {
+        "ComparisonValue": "$.Case.reference_number"
+      },
+      "Transitions": {
+        "NextAction": "play-closed",
+        "Conditions": [
+          {
+            "NextAction": "branch-case-channel",
+            "Condition": {
+              "Operator": "Exists",
+              "Operands": []
+            }
+          }
+        ],
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingCondition",
+            "NextAction": "play-closed"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "branch-case-channel",
+      "Type": "Compare",
+      "Parameters": {
+        "ComparisonValue": "$.Channel"
+      },
+      "Transitions": {
+        "NextAction": "play-case-voice",
+        "Conditions": [
+          {
+            "NextAction": "play-case-chat",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": [
+                "CHAT"
+              ]
+            }
+          }
+        ],
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingCondition",
+            "NextAction": "play-case-voice"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "play-case-chat",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "$.DataTables.AfterHoursCase.Text $.Case.reference_number. $.DataTables.AfterHoursCase.TextAfter"
+      },
+      "Transitions": {
+        "NextAction": "disconnect",
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "play-closed"
+          }
+        ],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "play-case-voice",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "SSML": "<speak>$.DataTables.AfterHoursCase.Text <say-as interpret-as=\"digits\">$.Case.reference_number</say-as>. $.DataTables.AfterHoursCase.TextAfter</speak>"
+      },
+      "Transitions": {
+        "NextAction": "disconnect",
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "play-closed"
+          }
+        ],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "play-closed",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "Harbor Ridge 311 is closed right now. Our team is available Monday to Friday, 8 a.m. to 5 p.m. Pacific."
+      },
+      "Transitions": {
+        "NextAction": "disconnect",
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "disconnect"
+          }
+        ],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "play-goodbye",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "$.DataTables.Goodbye.Text"
+      },
+      "Transitions": {
+        "NextAction": "disconnect",
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "disconnect"
+          }
+        ],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "play-fallback",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "Thank you for calling Harbor Ridge 3 1 1. This line is a demo. Thank you for calling Harbor Ridge 3 1 1. Goodbye."
+      },
+      "Transitions": {
+        "NextAction": "disconnect",
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "disconnect"
+          }
+        ],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "disconnect",
+      "Type": "DisconnectParticipant",
+      "Parameters": {},
+      "Transitions": {}
+    }
+  ]
+}

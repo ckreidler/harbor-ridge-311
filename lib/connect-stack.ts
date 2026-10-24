@@ -21,6 +21,7 @@ import {
   AFTER_HOURS_CASE_CHAT_TEXT,
   AFTER_HOURS_CASE_TEXT_AFTER,
   AFTER_HOURS_CASE_VOICE_TEXT,
+  MAIN_FLOW_NAME,
   mainFlow,
 } from './flows/main-flow';
 import { customerQueueFlow, QUEUE_CHAT_TEXT, QUEUE_VOICE_TEXT } from './flows/queue-flow';
@@ -923,7 +924,7 @@ export class ConnectStack extends cdk.Stack {
 
     const flow = new connect.CfnContactFlow(this, 'MainFlow', {
       instanceArn,
-      name: 'HarborRidge311-Main',
+      name: MAIN_FLOW_NAME,
       type: 'CONTACT_FLOW',
       content: cdk.Fn.toJsonString(mainFlow({
         dataTableId,
