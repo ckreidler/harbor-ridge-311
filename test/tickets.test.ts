@@ -20,26 +20,27 @@ import {
   type TicketStatus,
 } from '../lib/tickets/model';
 import { ticketOpenApiDocument } from '../lib/tickets/openapi';
-import type { TicketStore } from '../lib/tickets/store';
+import { IDENTITY_SOURCE_ANI, IDENTITY_SOURCE_CHAT } from '../lib/tickets/identity';
+import type { StoredTicket, TicketStore } from '../lib/tickets/store';
 
 const clock: Clock = { now: () => '2026-10-24T12:00:00.000Z' };
 const later: Clock = { now: () => '2026-10-24T13:00:00.000Z' };
 
 class MemoryStore implements TicketStore {
-  readonly tickets = new Map<string, Ticket>();
+  readonly tickets = new Map<string, StoredTicket>();
 
   async putNew(ticket: Ticket): Promise<boolean> {
     if (this.tickets.has(ticket.ticketId)) return false;
-    this.tickets.set(ticket.ticketId, structuredClone(ticket));
+    this.tickets.set(ticket.ticketId, { ...structuredClone(ticket), version: 1 });
     return true;
   }
 
-  async get(ticketId: string): Promise<Ticket | undefined> {
+  async get(ticketId: string): Promise<StoredTicket | undefined> {
     const ticket = this.tickets.get(ticketId);
     return ticket === undefined ? undefined : structuredClone(ticket);
   }
 
-  async queryByCustomer(customerId: string, limit: number): Promise<Ticket[]> {
+  async queryByCustomer(customerId: string, limit: number): Promise<StoredTicket[]> {
     return [...this.tickets.values()]
       .filter((ticket) => ticket.customerId === customerId)
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
@@ -47,12 +48,15 @@ class MemoryStore implements TicketStore {
       .map((ticket) => structuredClone(ticket));
   }
 
-  async save(ticket: Ticket): Promise<void> {
+  async save(expected: StoredTicket, ticket: Ticket): Promise<void> {
     const current = this.tickets.get(ticket.ticketId);
     if (!current || current.customerId !== ticket.customerId) {
       throw new TicketError(404, 'Ticket was not found');
     }
-    this.tickets.set(ticket.ticketId, structuredClone(ticket));
+    if (current.version !== expected.version || current.customerId !== expected.customerId) {
+      throw new TicketError(409, 'The ticket changed');
+    }
+    this.tickets.set(ticket.ticketId, { ...structuredClone(ticket), version: expected.version + 1 });
   }
 }
 
@@ -121,20 +125,18 @@ test('ticket ids use an unambiguous alphabet and reject biased bytes', () => {
 
 test('status transitions are one table and a closed ticket stays closed', () => {
   const table: Record<TicketStatus, readonly TicketStatus[]> = {
-    open: ['in_progress', 'resolved', 'closed'],
-    in_progress: ['resolved', 'closed'],
-    resolved: ['closed'],
+    open: ['closed'],
     closed: [],
   };
   for (const [from, next] of Object.entries(table) as Array<[TicketStatus, readonly TicketStatus[]]>) {
-    for (const to of ['open', 'in_progress', 'resolved', 'closed'] as const) {
+    for (const to of ['open', 'closed'] as const) {
       expect(canTransition(from, to)).toBe(next.includes(to));
     }
   }
   expect(transition('open', 'closed')).toBe('closed');
-  expect(() => transition('closed', 'in_progress')).toThrow(TicketError);
+  expect(() => transition('closed', 'open')).toThrow(TicketError);
   try {
-    transition('closed', 'in_progress');
+    transition('closed', 'open');
   } catch (error) {
     expect(error).toBeInstanceOf(TicketError);
     expect((error as TicketError).status).toBe(409);
@@ -308,54 +310,90 @@ test('notes stop at the limit and list returns the newest tickets', async () => 
   expect(tickets.map((ticket) => ticket.ticketId)).toEqual(['HR-345678', 'HR-234567']);
 });
 
-test('the request interceptor overwrites customerId from the contact', async () => {
-  const event = {
+function callEvent(name: string, args: Record<string, unknown>) {
+  return {
     mcp: {
       gatewayRequest: {
         body: {
           jsonrpc: '2.0',
           id: 7,
           method: 'tools/call',
-          params: {
-            name: 'Tickets___getTicket',
-            arguments: {
-              customerId: 'model-chose-this',
-              contactId: contact,
-              instanceId: 'instance-1',
-              ticketId: 'HR-234567',
-            },
-          },
+          params: { name, arguments: args },
         },
       },
     },
   };
-  const bound = await bindCustomer(event, async () => customer);
-  expect(bound.mcp.transformedGatewayRequest?.body).toMatchObject({
-    params: {
-      arguments: {
-        customerId: customer,
-        contactId: contact,
-        ticketId: 'HR-234567',
-      },
-    },
+}
+
+test('the request interceptor overwrites customerId and blocks chat reads', async () => {
+  const voice = {
+    customerId: customer,
+    identitySource: IDENTITY_SOURCE_ANI,
+    contactChannel: 'VOICE',
+  };
+  const chat = {
+    customerId: 'chat-profile',
+    identitySource: IDENTITY_SOURCE_CHAT,
+    contactChannel: 'CHAT',
+  };
+  const args = {
+    customerId: 'model-chose-this',
+    contactId: contact,
+    instanceId: 'instance-1',
+    ticketId: 'HR-234567',
+    channel: 'VOICE',
+  };
+  const read = await bindCustomer(callEvent('Tickets___getTicket', args), async () => voice);
+  expect(read.mcp.transformedGatewayRequest?.body).toMatchObject({
+    params: { arguments: { customerId: customer, contactId: contact, ticketId: 'HR-234567' } },
   });
-  const forwarded = bound.mcp.transformedGatewayRequest?.body as { params: { arguments: Record<string, unknown> } };
+  const forwarded = read.mcp.transformedGatewayRequest?.body as { params: { arguments: Record<string, unknown> } };
   expect(forwarded.params.arguments.instanceId).toBeUndefined();
 
-  const missing = await bindCustomer(event, async () => undefined);
+  const chatRead = await bindCustomer(callEvent('listMyTickets', args), async () => chat);
+  expect(chatRead.mcp.transformedGatewayResponse?.body).toMatchObject({
+    error: { code: -32602, message: 'Call from your phone to check or change a ticket.' },
+  });
+
+  const chatCreate = await bindCustomer(callEvent('createTicket', args), async () => chat);
+  expect(chatCreate.mcp.transformedGatewayRequest?.body).toMatchObject({
+    params: { arguments: { customerId: 'chat-profile', channel: 'CHAT' } },
+  });
+
+  const missing = await bindCustomer(callEvent('getTicket', args), async () => ({
+    customerId: undefined,
+    identitySource: undefined,
+    contactChannel: 'VOICE',
+  }));
   expect(missing.mcp.transformedGatewayResponse?.body).toMatchObject({
     error: { code: -32602, message: 'A verified customer profile is required.' },
   });
 
-  const lookupFailed = await bindCustomer(event, async () => {
+  const lookupFailed = await bindCustomer(callEvent('createTicket', args), async () => {
     throw new Error('connect denied');
   });
   expect(lookupFailed.mcp.transformedGatewayResponse?.statusCode).toBe(200);
 
   const passthrough = await bindCustomer({
     mcp: { gatewayRequest: { body: { jsonrpc: '2.0', id: 1, method: 'tools/list' } } },
-  }, async () => customer);
+  }, async () => voice);
   expect(passthrough.mcp.transformedGatewayRequest?.body).toMatchObject({ method: 'tools/list' });
+});
+
+test('a stale write cannot reopen a ticket that was closed', async () => {
+  const store = new MemoryStore();
+  await api(store, 'POST', '/tickets', createBody());
+  const stale = await store.get('HR-234567');
+  if (!stale) throw new Error('missing ticket');
+  const closed = await api(store, 'POST', '/tickets/{ticketId}/close', { customerId: customer }, undefined, { ticketId: 'HR-234567' });
+  expect(closed.status).toBe(200);
+  await expect(store.save(stale, {
+    ...stale,
+    description: 'late update',
+    status: 'open',
+  })).rejects.toMatchObject({ status: 409 });
+  expect(store.tickets.get('HR-234567')?.status).toBe('closed');
+  expect(store.tickets.get('HR-234567')?.version).toBe(2);
 });
 
 test('the committed OpenAPI document matches the handlers', () => {

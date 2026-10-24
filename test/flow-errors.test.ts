@@ -267,7 +267,7 @@ test('in-hours escalation sets the agent guide before transferring to the queue'
   }
 });
 
-test('a chat or phone caller is matched to a profile before the assistant session', () => {
+test('phone callers are matched by ANI and chat does not use email', () => {
   const flow = mainFlow(flowProps).content;
   const block = (identifier: string) => {
     const found = flow.Actions.find((action) => action.Identifier === identifier);
@@ -277,29 +277,27 @@ test('a chat or phone caller is matched to a profile before the assistant sessio
 
   expect(block('branch-identity').Parameters.ComparisonValue).toBe('$.Channel');
   expect(block('branch-identity').Transitions.Conditions?.[0]).toMatchObject({
-    NextAction: 'check-chat-email',
+    NextAction: 'create-profile-chat',
     Condition: { Operator: 'Equals', Operands: ['CHAT'] },
   });
   expect(block('branch-identity').Transitions.NextAction).toBe('check-caller-phone');
-  expect(block('check-chat-email').Parameters.ComparisonValue).toBe('$.Attributes.email');
-  expect(block('check-chat-email').Transitions.NextAction).toBe('create-assistant-session');
-  expect(block('check-caller-phone').Parameters.ComparisonValue).toBe('$.CustomerEndpoint.Address');
-  expect(block('find-profile-email').Parameters.ProfileRequestData).toEqual({
-    IdentifierName: '_email',
-    IdentifierValue: '$.Attributes.email',
+  expect(flow.Actions.some((action) => action.Identifier === 'check-chat-email')).toBe(false);
+  expect(flow.Actions.some((action) => action.Identifier === 'find-profile-email')).toBe(false);
+  expect(JSON.stringify(flow)).not.toContain('_email');
+  expect(JSON.stringify(flow)).not.toContain('Attributes.email');
+  expect(block('create-profile-chat').Parameters.ProfileRequestData).toEqual({
+    AccountNumber: '$.ContactId',
+    FirstName: 'Resident',
   });
+  expect(block('create-profile-chat').Transitions.Errors).toEqual([
+    { ErrorType: 'NoMatchingError', NextAction: 'create-assistant-session' },
+  ]);
+  expect(JSON.stringify(block('set-chat-identity').Parameters)).toContain('"identitySource":"chat"');
+  expect(JSON.stringify(block('set-chat-identity').Parameters)).toContain('"contactChannel":"$.Channel"');
+  expect(block('check-caller-phone').Parameters.ComparisonValue).toBe('$.CustomerEndpoint.Address');
   expect(block('find-profile-phone').Parameters.ProfileRequestData).toEqual({
     IdentifierName: '_phone',
     IdentifierValue: '$.CustomerEndpoint.Address',
-  });
-  expect(block('find-profile-email').Transitions.Errors).toEqual([
-    { ErrorType: 'NoMatchingError', NextAction: 'create-assistant-session' },
-    { ErrorType: 'NoneFoundError', NextAction: 'create-profile-email' },
-    { ErrorType: 'MultipleFoundError', NextAction: 'create-assistant-session' },
-  ]);
-  expect(block('create-profile-email').Parameters.ProfileRequestData).toEqual({
-    EmailAddress: '$.Attributes.email',
-    FirstName: 'Resident',
   });
   expect(block('create-profile-phone').Parameters.ProfileRequestData).toEqual({
     PhoneNumber: '$.CustomerEndpoint.Address',
@@ -309,6 +307,8 @@ test('a chat or phone caller is matched to a profile before the assistant sessio
     { ErrorType: 'NoMatchingError', NextAction: 'create-assistant-session' },
   ]);
   expect(JSON.stringify(block('set-customer-id').Parameters)).toContain('"customerId":"$.Customer.ProfileId"');
+  expect(JSON.stringify(block('set-customer-id').Parameters)).toContain('"identitySource":"ani"');
+  expect(JSON.stringify(block('set-customer-id').Parameters)).toContain('"contactChannel":"$.Channel"');
   expect(block('set-customer-id').Transitions.NextAction).toBe('create-assistant-session');
   expect(block('set-customer-id').Transitions.Errors?.[0].NextAction).toBe('create-assistant-session');
   expect(JSON.stringify(block('select-orchestrator').Parameters)).toContain('"customerId":"$.Attributes.customerId"');

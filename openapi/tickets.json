@@ -455,8 +455,6 @@
             "type": "string",
             "enum": [
               "open",
-              "in_progress",
-              "resolved",
               "closed"
             ]
           },

@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { Template } from 'aws-cdk-lib/assertions';
 import * as cdk from 'aws-cdk-lib/core';
 import { ConnectStack, CUSTOMER_QUEUE_PROMPT_ID } from '../lib/connect-stack';
+import { ticketOpenApiDocument } from '../lib/tickets/openapi';
 import {
   AFTER_HOURS_CLOSED_TEXT,
   AFTER_HOURS_TICKET_CHAT_TEXT,
@@ -239,6 +240,23 @@ test('ConnectStack looks up the English prompts and associates the sandbox numbe
 interface PolicyStatement {
   Action: string | string[];
   Resource?: unknown;
+}
+
+function contractApi(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(contractApi);
+  if (!value || typeof value !== 'object') return value;
+  const record = value as Record<string, unknown>;
+  const next: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(record)) {
+    if (key === 'security' || key.startsWith('x-amazon-apigateway-')) continue;
+    next[key] = contractApi(child);
+  }
+  if (next.components && typeof next.components === 'object') {
+    const components = { ...(next.components as Record<string, unknown>) };
+    delete components.securitySchemes;
+    next.components = components;
+  }
+  return next;
 }
 
 function policyStatements(template: Template): PolicyStatement[] {
@@ -864,23 +882,19 @@ test('ConnectStack stores customer-scoped tickets behind an IAM API and a JWT ga
       ThrottlingBurstLimit: 10,
     }],
   });
-  const methods = Object.values(template.findResources('AWS::ApiGateway::Method')) as Array<{
-    Properties: { AuthorizationType: string; HttpMethod: string; OperationName?: string };
-  }>;
-  const operations = methods
-    .filter((method) => method.Properties.HttpMethod !== 'OPTIONS')
-    .map((method) => `${method.Properties.HttpMethod} ${method.Properties.OperationName}`);
-  expect(operations.sort()).toEqual([
-    'GET getTicket',
-    'GET listMyTickets',
-    'POST closeTicket',
-    'POST createTicket',
-    'POST updateTicket',
-  ]);
-  for (const method of methods) {
-    if (method.Properties.HttpMethod === 'OPTIONS') continue;
-    expect(method.Properties.AuthorizationType).toBe('AWS_IAM');
-  }
+  template.resourceCountIs('AWS::ApiGateway::Method', 0);
+  const apiBody = Object.values(template.findResources('AWS::ApiGateway::RestApi')).map((resource) => (
+    resource as { Properties: { Body?: unknown; Name?: string } }
+  ).Properties).find((properties) => properties.Name === 'HarborRidge311Tickets')?.Body;
+  expect(contractApi(apiBody)).toEqual(ticketOpenApiDocument());
+  expect(ticketOpenApiDocument()).toEqual(JSON.parse(fs.readFileSync(
+    path.join(__dirname, '../openapi/tickets.json'),
+    'utf8',
+  )));
+  expect(JSON.stringify(apiBody)).toContain('x-amazon-apigateway-integration');
+  expect(JSON.stringify(apiBody)).toContain('awsSigv4');
+  expect(JSON.stringify(apiBody)).toContain('customerId');
+  expect(JSON.stringify(apiBody)).toContain('subject');
 
   template.hasResourceProperties('AWS::BedrockAgentCore::Gateway', {
     Name: 'HarborRidge311Tickets',
@@ -922,6 +936,26 @@ test('ConnectStack stores customer-scoped tickets behind an IAM API and a JWT ga
   expect(custom).toContain('describeInstance');
   expect(custom).toContain('customJWTAuthorizer');
   expect(custom).toContain('.my.connect.aws/.well-known/openid-configuration');
+
+  const dynamoActions = policyStatements(template).flatMap((statement) => {
+    const actions = [statement.Action].flat();
+    return actions.filter((action) => action.startsWith('dynamodb:'));
+  });
+  expect([...new Set(dynamoActions)].sort()).toEqual(['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:Query']);
+  const contactAttribute = policyStatements(template).find((statement) => (
+    [statement.Action].flat().includes('connect:GetContactAttributes')
+  ));
+  expect(JSON.stringify(contactAttribute?.Resource)).toContain('/contact/*');
+  expect(JSON.stringify(contactAttribute?.Resource)).not.toMatch(/"\*"/);
+
+  const customResources = Object.values(template.findResources('Custom::AWS')) as Array<{
+    Properties: { InstallLatestAwsSdk?: boolean };
+  }>;
+  const discoveryResource = customResources.find((resource) => JSON.stringify(resource).includes('describeInstance'));
+  const audienceResource = customResources.find((resource) => JSON.stringify(resource).includes('updateGateway'));
+  expect(discoveryResource?.Properties.InstallLatestAwsSdk).toBe(false);
+  expect(audienceResource?.Properties.InstallLatestAwsSdk).toBe(true);
+  expect(JSON.stringify(audienceResource)).toContain('gatewayConfigHash');
 
   const ticketActions = policyStatements(template).filter((statement) => {
     const actions = [statement.Action].flat();

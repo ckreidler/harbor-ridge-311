@@ -7,6 +7,7 @@ import {
   parseCreate,
   parseUpdate,
   randomIds,
+  requireContactId,
   requireCustomerId,
   requireTicketId,
   systemClock,
@@ -150,7 +151,7 @@ async function handleContact(
     subject,
     description: descriptionValue.length === 0 ? subject : descriptionValue,
     channel,
-    contactId: requireCustomerId(attribute(contact, 'ContactId')),
+    contactId: requireContactId(attribute(contact, 'ContactId')),
   }, clock, ids);
   return { ticketId: ticket.ticketId };
 }

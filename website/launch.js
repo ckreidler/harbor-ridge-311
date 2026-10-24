@@ -5,8 +5,7 @@ import { create } from '@amazon-connect-touchpoint/web';
   var status = document.getElementById('contact-status');
   var chatButton = document.getElementById('start-chat');
   var callButton = document.getElementById('start-call');
-  var emailInput = document.getElementById('chat-email');
-  if (!chatButton || !callButton || !emailInput) return;
+  if (!chatButton || !callButton) return;
 
   var current = null;
   var mode = null;
@@ -33,11 +32,6 @@ import { create } from '@amazon-connect-touchpoint/web';
       return;
     }
 
-    var email = emailInput.value.trim();
-    if (nextMode === 'chat' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setStatus('Enter an email address to chat.');
-      return;
-    }
     chatButton.disabled = true;
     callButton.disabled = true;
     setStatus(nextMode === 'chat' ? 'Opening chat…' : 'Opening the call…');
@@ -59,7 +53,6 @@ import { create } from '@amazon-connect-touchpoint/web';
           contactFlowId: config.contactFlowId,
           region: config.region,
           participantDisplayName: 'Harbor Ridge visitor',
-          contactAttributes: nextMode === 'chat' ? { email: email } : undefined,
         },
         input: nextMode === 'chat' ? 'text' : 'voiceMini',
         colorMode: 'light',

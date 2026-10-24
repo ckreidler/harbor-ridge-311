@@ -29,7 +29,7 @@ SSM parameters, read at deploy time with `StringParameter.valueForStringParamete
 - `/connect/sandbox/assistant-arn`
 - `/connect/sandbox/assistant-id`
 
-Tickets live in this stack. A DynamoDB table stores them, an IAM-authenticated API Gateway fronts one Lambda, and an Amazon Bedrock AgentCore Gateway exposes that API as MCP tools. The orchestration security profile can call those tools. The flow matches the caller to a Customer Profile by phone number or chat email before the assistant starts, stores the profile id on the contact, and the gateway interceptor copies that id into every ticket tool call. Chat on the website asks for an email address and passes it as the contact attribute `email`. A caller with no profile gets one created from that phone number or email. After hours, the flow invokes the ticket Lambda directly and speaks the new ticket id.
+Tickets live in this stack. A DynamoDB table stores them, an IAM-authenticated API Gateway fronts one Lambda, and an Amazon Bedrock AgentCore Gateway exposes that API as MCP tools. The orchestration security profile can call those tools. A phone call matches the ANI to a Customer Profile and can open, check, update, and close that profile's tickets. Chat can open a ticket on a profile created for that contact, and cannot check or change one. After hours, the flow invokes the ticket Lambda directly and speaks the new ticket id.
 
 This app has no stage context. connect-platform only publishes `sandbox`, so those paths live in one constant, `SANDBOX_PARAMETER_PREFIX`, in `lib/connect-stack.ts`.
 

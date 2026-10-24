@@ -10,6 +10,7 @@ import * as nodejs from 'aws-cdk-lib/aws-lambda-nodejs';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as cdk from 'aws-cdk-lib/core';
 import * as cr from 'aws-cdk-lib/custom-resources';
+import { ticketOpenApiDocument } from './openapi';
 import { TICKET_API_STAGE, TICKET_GATEWAY_NAME, TICKET_TARGET_NAME } from './tools';
 
 const MCP_VERSION = '2025-03-26';
@@ -22,12 +23,62 @@ export interface TicketSystem {
   readonly lambdaIntegration: connect.CfnIntegrationAssociation;
 }
 
-function executeArn(stack: cdk.Stack, api: apigateway.RestApi, methodAndPath: string): string {
+function executeArn(stack: cdk.Stack, apiId: string, methodAndPath: string): string {
   return stack.formatArn({
     service: 'execute-api',
-    resource: api.restApiId,
+    resource: apiId,
     resourceName: `${TICKET_API_STAGE}/${methodAndPath}`,
   });
+}
+
+function lambdaProxyUri(lambdaArn: string): string {
+  return cdk.Fn.join('', [
+    'arn:',
+    cdk.Aws.PARTITION,
+    ':apigateway:',
+    cdk.Aws.REGION,
+    ':lambda:path/2015-03-31/functions/',
+    lambdaArn,
+    '/invocations',
+  ]);
+}
+
+function deployedApiDefinition(lambdaArn: string): { [key: string]: unknown } {
+  const document = ticketOpenApiDocument();
+  const paths = document.paths as Record<string, Record<string, Record<string, unknown>>>;
+  const deployedPaths: Record<string, Record<string, unknown>> = {};
+  for (const [route, methods] of Object.entries(paths)) {
+    const deployedMethods: Record<string, unknown> = {};
+    for (const [method, operation] of Object.entries(methods)) {
+      deployedMethods[method] = {
+        ...operation,
+        security: [{ sigv4: [] }],
+        'x-amazon-apigateway-integration': {
+          type: 'aws_proxy',
+          httpMethod: 'POST',
+          uri: lambdaProxyUri(lambdaArn),
+          passthroughBehavior: 'when_no_match',
+        },
+      };
+    }
+    deployedPaths[route] = deployedMethods;
+  }
+  const components = document.components as Record<string, unknown>;
+  return {
+    ...document,
+    paths: deployedPaths,
+    components: {
+      ...components,
+      securitySchemes: {
+        sigv4: {
+          type: 'apiKey',
+          name: 'Authorization',
+          in: 'header',
+          'x-amazon-apigateway-authtype': 'awsSigv4',
+        },
+      },
+    },
+  };
 }
 
 function lambdaFunction(
@@ -81,36 +132,39 @@ export function addTickets(stack: cdk.Stack, instanceArn: string, instanceId: st
     path.join(__dirname, 'handler.ts'),
   );
   ticketFunction.addEnvironment('TICKET_TABLE_NAME', table.tableName);
-  table.grantReadWriteData(ticketFunction);
+  ticketFunction.addToRolePolicy(new iam.PolicyStatement({
+    actions: ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:Query'],
+    resources: [table.tableArn, cdk.Fn.join('', [table.tableArn, '/index/ByCustomer'])],
+  }));
   ticketFunction.addPermission('AllowConnectInvoke', {
     principal: new iam.ServicePrincipal('connect.amazonaws.com'),
     sourceArn: instanceArn,
   });
 
-  const integration = new apigateway.LambdaIntegration(ticketFunction, { proxy: true });
-  const api = new apigateway.RestApi(stack, 'TicketApi', {
+  const api = new apigateway.SpecRestApi(stack, 'TicketApi', {
     restApiName: 'HarborRidge311Tickets',
+    apiDefinition: apigateway.ApiDefinition.fromInline(deployedApiDefinition(ticketFunction.functionArn)),
     deployOptions: {
       stageName: TICKET_API_STAGE,
       throttlingRateLimit: 5,
       throttlingBurstLimit: 10,
     },
-    defaultMethodOptions: {
-      authorizationType: apigateway.AuthorizationType.IAM,
-    },
   });
-  const tickets = api.root.addResource('tickets');
-  const oneTicket = tickets.addResource('{ticketId}');
-  const closeTicket = oneTicket.addResource('close');
-  const iamMethod = { authorizationType: apigateway.AuthorizationType.IAM };
-  tickets.addMethod('POST', integration, { ...iamMethod, operationName: 'createTicket' });
-  tickets.addMethod('GET', integration, { ...iamMethod, operationName: 'listMyTickets' });
-  oneTicket.addMethod('GET', integration, { ...iamMethod, operationName: 'getTicket' });
-  oneTicket.addMethod('POST', integration, { ...iamMethod, operationName: 'updateTicket' });
-  closeTicket.addMethod('POST', integration, { ...iamMethod, operationName: 'closeTicket' });
+  for (const [id, methodAndPath] of [
+    ['GetTickets', 'GET/tickets'],
+    ['PostTickets', 'POST/tickets'],
+    ['GetOneTicket', 'GET/tickets/*'],
+    ['PostOneTicket', 'POST/tickets/*'],
+    ['PostCloseTicket', 'POST/tickets/*/close'],
+  ] as const) {
+    ticketFunction.addPermission(`AllowApi${id}`, {
+      principal: new iam.ServicePrincipal('apigateway.amazonaws.com'),
+      sourceArn: executeArn(stack, api.restApiId, methodAndPath),
+    });
+  }
 
   const discovery = new cr.AwsCustomResource(stack, 'TicketDiscoveryUrl', {
-    installLatestAwsSdk: true,
+    installLatestAwsSdk: false,
     onCreate: {
       service: 'connect',
       action: 'describeInstance',
@@ -144,7 +198,7 @@ export function addTickets(stack: cdk.Stack, instanceArn: string, instanceId: st
   );
   interceptor.addToRolePolicy(new iam.PolicyStatement({
     actions: ['connect:GetContactAttributes'],
-    resources: [instanceArn],
+    resources: [cdk.Fn.join('', [instanceArn, '/contact/*'])],
   }));
 
   const gatewayRole = new iam.Role(stack, 'TicketGatewayRole', {
@@ -153,11 +207,11 @@ export function addTickets(stack: cdk.Stack, instanceArn: string, instanceId: st
   gatewayRole.addToPolicy(new iam.PolicyStatement({
     actions: ['execute-api:Invoke'],
     resources: [
-      executeArn(stack, api, 'GET/tickets'),
-      executeArn(stack, api, 'POST/tickets'),
-      executeArn(stack, api, 'GET/tickets/*'),
-      executeArn(stack, api, 'POST/tickets/*'),
-      executeArn(stack, api, 'POST/tickets/*/close'),
+      executeArn(stack, api.restApiId, 'GET/tickets'),
+      executeArn(stack, api.restApiId, 'POST/tickets'),
+      executeArn(stack, api.restApiId, 'GET/tickets/*'),
+      executeArn(stack, api.restApiId, 'POST/tickets/*'),
+      executeArn(stack, api.restApiId, 'POST/tickets/*/close'),
     ],
   }));
   gatewayRole.addToPolicy(new iam.PolicyStatement({
@@ -170,7 +224,7 @@ export function addTickets(stack: cdk.Stack, instanceArn: string, instanceId: st
     interceptor: { lambda: { arn: interceptor.functionArn } },
     inputConfiguration: { passRequestHeaders: false },
   }];
-  const gateway = new bedrockagentcore.CfnGateway(stack, 'TicketGateway', {
+  const gatewayConfig = {
     name: TICKET_GATEWAY_NAME,
     description: 'Harbor Ridge 311 ticket tools',
     protocolType: 'MCP',
@@ -189,35 +243,31 @@ export function addTickets(stack: cdk.Stack, instanceArn: string, instanceId: st
       },
     },
     interceptorConfigurations: interceptors,
-  });
+  };
+  const gateway = new bedrockagentcore.CfnGateway(stack, 'TicketGateway', gatewayConfig);
   interceptor.addPermission('AllowThisGateway', {
     principal: new iam.ServicePrincipal('bedrock-agentcore.amazonaws.com'),
     sourceArn: gateway.attrGatewayArn,
   });
-
   const audienceCall: cr.AwsSdkCall = {
     service: 'bedrock-agentcore-control',
     action: 'updateGateway',
     parameters: {
       gatewayIdentifier: gateway.attrGatewayIdentifier,
-      name: TICKET_GATEWAY_NAME,
-      roleArn: gatewayRole.roleArn,
-      authorizerType: 'CUSTOM_JWT',
-      protocolType: 'MCP',
-      description: 'Harbor Ridge 311 ticket tools',
-      protocolConfiguration: {
-        mcp: {
-          supportedVersions: [MCP_VERSION],
-          instructions: 'Harbor Ridge 311 tickets for the signed-in customer.',
-        },
-      },
+      name: gatewayConfig.name,
+      roleArn: gatewayConfig.roleArn,
+      authorizerType: gatewayConfig.authorizerType,
+      protocolType: gatewayConfig.protocolType,
+      description: gatewayConfig.description,
+      protocolConfiguration: gatewayConfig.protocolConfiguration,
       authorizerConfiguration: {
         customJWTAuthorizer: {
           discoveryUrl,
           allowedAudience: [gateway.attrGatewayIdentifier],
         },
       },
-      interceptorConfigurations: interceptors,
+      interceptorConfigurations: gatewayConfig.interceptorConfigurations,
+      gatewayConfigHash: cdk.Fn.toJsonString(gatewayConfig),
     },
     physicalResourceId: cr.PhysicalResourceId.of(gateway.attrGatewayIdentifier),
   };

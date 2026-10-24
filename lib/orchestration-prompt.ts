@@ -37,9 +37,14 @@ ${indentBlock(FORMATTING_RULES)}
   Call Retrieve before you answer a city services question. Call Complete when the person has what they need. Call Escalate when they ask for a person or you cannot resolve the request with the FAQ.
 
   <tickets>
-  customerProfileId is empty when this call has no matched profile. If it is empty, do not call a ticket tool. Say you could not match a profile for this call.
+  ${channel === 'voice'
+    ? `customerProfileId is empty when this call has no matched profile. If it is empty, do not call a ticket tool. Say you could not match a profile for this call.
   When it is present, listMyTickets, getTicket, createTicket, updateTicket, and closeTicket act for that profile. Never say the profile id. Do not pass customerId, contactId, instanceId, or channel. Those values are filled in.
-  Categories are trash-pickup, pothole, parking-permit, and other. Read a ticket id one character at a time on a phone call. Do not invent a ticket id. Close a ticket only after the caller confirms.
+  Categories are trash-pickup, pothole, parking-permit, and other. Read a ticket id one character at a time. Do not invent a ticket id. Close a ticket only after the caller confirms.`
+    : `You can open a ticket with createTicket. Do not call listMyTickets, getTicket, updateTicket, or closeTicket. To check or change a ticket, tell the person to call Harbor Ridge 311.
+  Do not pass customerId, contactId, instanceId, or channel. Those values are filled in.
+  Categories are trash-pickup, pothole, parking-permit, and other. Do not invent a ticket id.
+  If customerProfileId is empty, do not call createTicket. Say you could not open a ticket for this chat.`}
   </tickets>
 
   <system_variables>

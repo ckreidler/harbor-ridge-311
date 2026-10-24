@@ -5,6 +5,7 @@ import {
   TicketError,
   isCategory,
   isChannel,
+  isContactId,
   isCustomerId,
   isTicketId,
   ticketIdFromBytes,
@@ -13,7 +14,7 @@ import {
   type TicketCategory,
   type TicketChannel,
 } from './model';
-import type { TicketStore } from './store';
+import type { StoredTicket, TicketStore } from './store';
 
 export interface Clock {
   now(): string;
@@ -67,7 +68,13 @@ export interface TicketScope {
   readonly ticketId: string;
 }
 
-function owned(ticket: Ticket | undefined, customerId: string): Ticket {
+function visible(ticket: StoredTicket): Ticket {
+  const { version, ...rest } = ticket;
+  void version;
+  return rest;
+}
+
+function owned(ticket: StoredTicket | undefined, customerId: string): StoredTicket {
   if (!ticket || ticket.customerId !== customerId) {
     throw new TicketError(404, 'Ticket was not found');
   }
@@ -101,12 +108,12 @@ export async function createTicket(
 }
 
 export async function getTicket(store: TicketStore, scope: TicketScope): Promise<Ticket> {
-  return owned(await store.get(scope.ticketId), scope.customerId);
+  return visible(owned(await store.get(scope.ticketId), scope.customerId));
 }
 
 export async function listMyTickets(store: TicketStore, customerId: string): Promise<Ticket[]> {
   const tickets = await store.queryByCustomer(customerId, LIMITS.list);
-  return tickets.filter((ticket) => ticket.customerId === customerId);
+  return tickets.filter((ticket) => ticket.customerId === customerId).map(visible);
 }
 
 export async function updateTicket(store: TicketStore, input: UpdateTicketInput, clock: Clock): Promise<Ticket> {
@@ -121,30 +128,51 @@ export async function updateTicket(store: TicketStore, input: UpdateTicketInput,
     throw new TicketError(409, 'This ticket has too many notes');
   }
   const updated: Ticket = {
-    ...current,
-    description: input.description ?? current.description,
+    ticketId: current.ticketId,
+    customerId: current.customerId,
     category: input.category ?? current.category,
+    subject: current.subject,
+    description: input.description ?? current.description,
+    status: current.status,
+    channel: current.channel,
+    contactId: current.contactId,
+    createdAt: current.createdAt,
     notes,
     updatedAt: clock.now(),
   };
-  await store.save(updated);
+  await store.save(current, updated);
   return updated;
 }
 
 export async function closeTicket(store: TicketStore, scope: TicketScope, clock: Clock): Promise<Ticket> {
   const current = owned(await store.get(scope.ticketId), scope.customerId);
   const updated: Ticket = {
-    ...current,
+    ticketId: current.ticketId,
+    customerId: current.customerId,
+    category: current.category,
+    subject: current.subject,
+    description: current.description,
     status: transition(current.status, 'closed'),
+    channel: current.channel,
+    contactId: current.contactId,
+    createdAt: current.createdAt,
+    notes: current.notes,
     updatedAt: clock.now(),
   };
-  await store.save(updated);
+  await store.save(current, updated);
   return updated;
 }
 
 export function requireCustomerId(value: unknown): string {
   if (typeof value !== 'string' || !isCustomerId(value)) {
     throw new TicketError(400, 'customerId is invalid');
+  }
+  return value;
+}
+
+export function requireContactId(value: unknown): string {
+  if (typeof value !== 'string' || !isContactId(value)) {
+    throw new TicketError(400, 'contactId is invalid');
   }
   return value;
 }
@@ -182,7 +210,7 @@ export function parseCreate(value: Record<string, unknown>): CreateTicketInput {
     subject: text(value.subject, 'subject', LIMITS.subject),
     description: text(value.description, 'description', LIMITS.description),
     channel: value.channel,
-    contactId: requireCustomerId(value.contactId),
+    contactId: requireContactId(value.contactId),
   };
 }
 

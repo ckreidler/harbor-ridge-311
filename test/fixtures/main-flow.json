@@ -124,7 +124,7 @@
         "NextAction": "check-caller-phone",
         "Conditions": [
           {
-            "NextAction": "check-chat-email",
+            "NextAction": "create-profile-chat",
             "Condition": {
               "Operator": "Equals",
               "Operands": [
@@ -142,25 +142,42 @@
       }
     },
     {
-      "Identifier": "check-chat-email",
-      "Type": "Compare",
+      "Identifier": "create-profile-chat",
+      "Type": "CreateCustomerProfile",
       "Parameters": {
-        "ComparisonValue": "$.Attributes.email"
+        "ProfileRequestData": {
+          "AccountNumber": "$.ContactId",
+          "FirstName": "Resident"
+        }
+      },
+      "Transitions": {
+        "NextAction": "set-chat-identity",
+        "Conditions": [],
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "create-assistant-session"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "set-chat-identity",
+      "Type": "UpdateContactAttributes",
+      "Parameters": {
+        "Attributes": {
+          "customerId": "$.Customer.ProfileId",
+          "identitySource": "chat",
+          "contactChannel": "$.Channel"
+        },
+        "TargetContact": "Current"
       },
       "Transitions": {
         "NextAction": "create-assistant-session",
-        "Conditions": [
-          {
-            "NextAction": "find-profile-email",
-            "Condition": {
-              "Operator": "Exists",
-              "Operands": []
-            }
-          }
-        ],
+        "Conditions": [],
         "Errors": [
           {
-            "ErrorType": "NoMatchingCondition",
+            "ErrorType": "NoMatchingError",
             "NextAction": "create-assistant-session"
           }
         ]
@@ -221,35 +238,6 @@
       }
     },
     {
-      "Identifier": "find-profile-email",
-      "Type": "GetCustomerProfile",
-      "Parameters": {
-        "ProfileRequestData": {
-          "IdentifierName": "_email",
-          "IdentifierValue": "$.Attributes.email"
-        },
-        "ProfileResponseData": []
-      },
-      "Transitions": {
-        "NextAction": "set-customer-id",
-        "Conditions": [],
-        "Errors": [
-          {
-            "ErrorType": "NoMatchingError",
-            "NextAction": "create-assistant-session"
-          },
-          {
-            "ErrorType": "NoneFoundError",
-            "NextAction": "create-profile-email"
-          },
-          {
-            "ErrorType": "MultipleFoundError",
-            "NextAction": "create-assistant-session"
-          }
-        ]
-      }
-    },
-    {
       "Identifier": "create-profile-phone",
       "Type": "CreateCustomerProfile",
       "Parameters": {
@@ -270,31 +258,13 @@
       }
     },
     {
-      "Identifier": "create-profile-email",
-      "Type": "CreateCustomerProfile",
-      "Parameters": {
-        "ProfileRequestData": {
-          "EmailAddress": "$.Attributes.email",
-          "FirstName": "Resident"
-        }
-      },
-      "Transitions": {
-        "NextAction": "set-customer-id",
-        "Conditions": [],
-        "Errors": [
-          {
-            "ErrorType": "NoMatchingError",
-            "NextAction": "create-assistant-session"
-          }
-        ]
-      }
-    },
-    {
       "Identifier": "set-customer-id",
       "Type": "UpdateContactAttributes",
       "Parameters": {
         "Attributes": {
-          "customerId": "$.Customer.ProfileId"
+          "customerId": "$.Customer.ProfileId",
+          "identitySource": "ani",
+          "contactChannel": "$.Channel"
         },
         "TargetContact": "Current"
       },
@@ -860,6 +830,5 @@
       "Parameters": {},
       "Transitions": {}
     }
-  ],
-  "Metadata": {}
+  ]
 }

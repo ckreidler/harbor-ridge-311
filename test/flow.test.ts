@@ -35,8 +35,12 @@ function matchesFixture(built: unknown, fixture: string): void {
   expect(built).toEqual(body);
 }
 
-test('builder MainFlow matches the hand-written flow except Metadata', () => {
-  matchesFixture(mainFlow(flowProps).content, 'main-flow-0966293.json');
+test('builder MainFlow matches the current snapshot', () => {
+  const snapshot = JSON.parse(fs.readFileSync(
+    path.join(__dirname, 'fixtures', 'main-flow.json'),
+    'utf8',
+  )) as unknown;
+  expect(mainFlow(flowProps).content).toEqual(snapshot);
 });
 
 test('builder customer queue flow matches the hand-written flow except Metadata', () => {

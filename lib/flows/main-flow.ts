@@ -22,6 +22,7 @@ import {
   type CompiledFlow,
   type DataTableQuery,
 } from '../flow';
+import { IDENTITY_SOURCE_ANI, IDENTITY_SOURCE_CHAT } from '../tickets/identity';
 
 export interface MainFlowProps {
   dataTableId: string;
@@ -85,7 +86,7 @@ function profileLookup(
   });
 }
 
-export function mainFlow(props: MainFlowProps): CompiledFlow {
+export function mainFlow(props: MainFlowProps): CompiledFlow<typeof CONTACT_FLOW> {
   return flow({
     name: MAIN_FLOW_NAME,
     type: CONTACT_FLOW,
@@ -113,16 +114,23 @@ export function mainFlow(props: MainFlowProps): CompiledFlow {
         ComparisonValue: '$.Channel',
       }, {
         next: 'check-caller-phone',
-        conditions: [equals('CHAT', 'check-chat-email')],
+        conditions: [equals('CHAT', 'create-profile-chat')],
         noMatch: 'check-caller-phone',
       }),
-      compare('check-chat-email', {
-        ComparisonValue: '$.Attributes.email',
-      }, {
-        next: 'create-assistant-session',
-        conditions: [exists('find-profile-email')],
-        noMatch: 'create-assistant-session',
-      }),
+      createCustomerProfile('create-profile-chat', {
+        ProfileRequestData: {
+          AccountNumber: '$.ContactId',
+          FirstName: 'Resident',
+        },
+      }, { next: 'set-chat-identity', error: 'create-assistant-session' }),
+      updateContactAttributes('set-chat-identity', {
+        Attributes: {
+          customerId: '$.Customer.ProfileId',
+          identitySource: IDENTITY_SOURCE_CHAT,
+          contactChannel: '$.Channel',
+        },
+        TargetContact: 'Current',
+      }, { next: 'create-assistant-session', error: 'create-assistant-session' }),
       compare('check-caller-phone', {
         ComparisonValue: '$.CustomerEndpoint.Address',
       }, {
@@ -138,28 +146,18 @@ export function mainFlow(props: MainFlowProps): CompiledFlow {
         'create-profile-phone',
         'create-assistant-session',
       ),
-      profileLookup(
-        'find-profile-email',
-        '_email',
-        '$.Attributes.email',
-        'set-customer-id',
-        'create-profile-email',
-        'create-assistant-session',
-      ),
       createCustomerProfile('create-profile-phone', {
         ProfileRequestData: {
           PhoneNumber: '$.CustomerEndpoint.Address',
           FirstName: 'Resident',
         },
       }, { next: 'set-customer-id', error: 'create-assistant-session' }),
-      createCustomerProfile('create-profile-email', {
-        ProfileRequestData: {
-          EmailAddress: '$.Attributes.email',
-          FirstName: 'Resident',
-        },
-      }, { next: 'set-customer-id', error: 'create-assistant-session' }),
       updateContactAttributes('set-customer-id', {
-        Attributes: { customerId: '$.Customer.ProfileId' },
+        Attributes: {
+          customerId: '$.Customer.ProfileId',
+          identitySource: IDENTITY_SOURCE_ANI,
+          contactChannel: '$.Channel',
+        },
         TargetContact: 'Current',
       }, { next: 'create-assistant-session', error: 'create-assistant-session' }),
       createWisdomSession('create-assistant-session', {

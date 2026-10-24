@@ -53,7 +53,7 @@ describe('touchpoint handlers', () => {
     const result = await chatHandler(request({
       InstanceId: 'browser-instance',
       ContactFlowId: 'browser-flow',
-      Attributes: { injected: 'yes', email: ' resident@example.com ' },
+      Attributes: { injected: 'yes' },
       SupportedMessagingContentTypes: ['text/plain'],
     }));
 
@@ -70,7 +70,6 @@ describe('touchpoint handlers', () => {
         'application/vnd.amazonaws.connect.message.interactive',
         'application/vnd.amazonaws.connect.message.interactive.response',
       ],
-      Attributes: { email: 'resident@example.com' },
     }]);
     expect(JSON.parse(result.body)).toEqual({
       data: {
@@ -128,24 +127,11 @@ describe('touchpoint handlers', () => {
     const result = await chatHandler({
       headers: { origin: ORIGIN },
       isBase64Encoded: true,
-      body: Buffer.from(JSON.stringify({
-        InstanceId: 'nope',
-        Attributes: { email: 'resident@example.com', injected: 'yes' },
-      }), 'utf8').toString('base64'),
+      body: Buffer.from(JSON.stringify({ InstanceId: 'nope' }), 'utf8').toString('base64'),
     });
 
     expect(result.statusCode).toBe(200);
     expect(sent[0].InstanceId).toBe('instance-from-env');
-    expect(sent[0].Attributes).toEqual({ email: 'resident@example.com' });
-  });
-
-  test('chat requires an email and drops every other attribute', async () => {
-    const missing = await chatHandler(request({ Attributes: { injected: 'yes' } }));
-    const invalid = await chatHandler(request({ Attributes: { email: 'not-an-email' } }));
-
-    expect(missing.statusCode).toBe(400);
-    expect(invalid.statusCode).toBe(400);
-    expect(sent).toEqual([]);
   });
 
   test('rejects a body larger than 4 KB', async () => {
@@ -160,7 +146,7 @@ describe('touchpoint handlers', () => {
 
   test('hides Connect errors from the browser', async () => {
     fail = true;
-    const result = await chatHandler(request({ Attributes: { email: 'resident@example.com' } }));
+    const result = await chatHandler(request({}));
 
     expect(result.statusCode).toBe(502);
     expect(result.body).not.toContain('123');
