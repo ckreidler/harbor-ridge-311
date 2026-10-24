@@ -1,3 +1,4 @@
+import type { FlowContent } from './flow';
 import { diagramPage } from './mermaid';
 import { ESCALATION_GUIDE_FLOW_NAME, escalationGuideFlow } from '../flows/escalation-guide-flow';
 import { MAIN_FLOW_NAME, mainFlow, type MainFlowProps } from '../flows/main-flow';
@@ -16,21 +17,25 @@ const mainFlowProps: MainFlowProps = {
   requestCategoryFieldId: 'category',
 };
 
-export function flowPages(): Array<{ name: string; body: string }> {
+export interface FlowPage {
+  readonly name: string;
+  readonly content: FlowContent;
+  readonly body: string;
+}
+
+function page(name: string, content: FlowContent): FlowPage {
+  return { name, content, body: diagramPage(name, content) };
+}
+
+export function flowPages(): FlowPage[] {
   return [
-    { name: MAIN_FLOW_NAME, body: diagramPage(MAIN_FLOW_NAME, mainFlow(mainFlowProps).content) },
-    {
-      name: QUEUE_FLOW_NAME,
-      body: diagramPage(QUEUE_FLOW_NAME, customerQueueFlow({
-        dataTableId: 'table',
-        holdMusicPromptArn: 'hold-music',
-      }).content),
-    },
-    {
-      name: ESCALATION_GUIDE_FLOW_NAME,
-      body: diagramPage(ESCALATION_GUIDE_FLOW_NAME, escalationGuideFlow({
-        detailViewArn: 'view',
-      }).content),
-    },
+    page(MAIN_FLOW_NAME, mainFlow(mainFlowProps).content),
+    page(QUEUE_FLOW_NAME, customerQueueFlow({
+      dataTableId: 'table',
+      holdMusicPromptArn: 'hold-music',
+    }).content),
+    page(ESCALATION_GUIDE_FLOW_NAME, escalationGuideFlow({
+      detailViewArn: 'view',
+    }).content),
   ];
 }
