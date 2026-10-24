@@ -7,8 +7,10 @@ import {
   disconnectParticipant,
   flow,
   messageParticipant,
+  updateContactAttributes,
   type ConnectFlowType,
 } from '../lib/flow';
+import { flowPages } from '../lib/flow/pages';
 import { escalationGuideFlow } from '../lib/flows/escalation-guide-flow';
 import { mainFlow } from '../lib/flows/main-flow';
 import { customerQueueFlow } from '../lib/flows/queue-flow';
@@ -22,8 +24,7 @@ const flowProps = {
   queueArn: 'queue',
   escalationGuideFlowArn: 'escalation-guide',
   customerQueueFlowArn: 'queue-flow',
-  caseTemplateId: 'template',
-  requestCategoryFieldId: '137be1e8-7eac-4741-9a3b-18aedbdcf77b',
+  ticketLambdaArn: 'ticket-lambda',
 };
 
 function matchesFixture(built: unknown, fixture: string): void {
@@ -36,8 +37,37 @@ function matchesFixture(built: unknown, fixture: string): void {
   expect(built).toEqual(body);
 }
 
-test('builder MainFlow matches the hand-written flow except Metadata', () => {
-  matchesFixture(mainFlow(flowProps).content, 'main-flow-0966293.json');
+test('updateContactAttributes rejects an empty value', () => {
+  expect(() => updateContactAttributes('set-customer-id', {
+    Attributes: { customerId: '' },
+    TargetContact: 'Current',
+  }, { next: 'next', error: 'next' })).toThrow('attribute "customerId" is empty');
+});
+
+test('compiled flows set no empty contact attributes', () => {
+  for (const page of flowPages()) {
+    for (const action of page.content.Actions) {
+      if (action.Type !== 'UpdateContactAttributes') continue;
+      const attributes = action.Parameters.Attributes;
+      expect(attributes && typeof attributes === 'object' && !Array.isArray(attributes)).toBe(true);
+      for (const [name, value] of Object.entries(attributes as Record<string, unknown>)) {
+        expect({ flow: page.name, action: action.Identifier, attribute: name, empty: value === '' }).toEqual({
+          flow: page.name,
+          action: action.Identifier,
+          attribute: name,
+          empty: false,
+        });
+      }
+    }
+  }
+});
+
+test('builder MainFlow matches the current snapshot', () => {
+  const snapshot = JSON.parse(fs.readFileSync(
+    path.join(__dirname, 'fixtures', 'main-flow.json'),
+    'utf8',
+  )) as unknown;
+  expect(mainFlow(flowProps).content).toEqual(snapshot);
 });
 
 test('builder customer queue flow matches the hand-written flow except Metadata', () => {

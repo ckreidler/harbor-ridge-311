@@ -55,6 +55,38 @@ test('handler updates the session orchestrator for the contact channel', async (
   ]);
 });
 
+test('handler stores a customer id on the session and skips an empty one', async () => {
+  const sessions: UpdateSessionCommandInput[] = [];
+  const data: unknown[] = [];
+  const updateSession = selectOrchestratorRuntime.updateSession;
+  const updateSessionData = selectOrchestratorRuntime.updateSessionData;
+  selectOrchestratorRuntime.updateSession = async (input) => {
+    sessions.push(input);
+  };
+  selectOrchestratorRuntime.updateSessionData = async (input) => {
+    data.push(input);
+  };
+  try {
+    await handler({
+      Details: {
+        ContactData: { Channel: 'VOICE' },
+        Parameters: { sessionArn: SESSION_ARN, customerId: 'profile-1' },
+      },
+    });
+    await handler(event('CHAT'));
+  } finally {
+    selectOrchestratorRuntime.updateSession = updateSession;
+    selectOrchestratorRuntime.updateSessionData = updateSessionData;
+  }
+  expect(sessions).toHaveLength(2);
+  expect(data).toEqual([{
+    assistantId: 'assistant-id',
+    sessionId: SESSION_ARN,
+    namespace: 'Custom',
+    data: [{ key: 'customerId', value: { stringValue: 'profile-1' } }],
+  }]);
+});
+
 test('handler rejects a contact that has no session ARN', async () => {
   await expect(handler({
     Details: {

@@ -1,0 +1,652 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Harbor Ridge 311 Tickets",
+    "version": "1.0.0",
+    "description": "Customer-scoped tickets. Every call includes customerId. A ticket owned by another customer is a 404."
+  },
+  "paths": {
+    "/tickets": {
+      "get": {
+        "operationId": "listMyTickets",
+        "summary": "List the newest tickets for one customer",
+        "parameters": [
+          {
+            "name": "customerId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9-]{1,64}$"
+            }
+          },
+          {
+            "name": "contactId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9-]{1,64}$"
+            }
+          },
+          {
+            "name": "instanceId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9-]{1,64}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Up to 20 tickets, newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "tickets"
+                  ],
+                  "properties": {
+                    "tickets": {
+                      "type": "array",
+                      "maxItems": 20,
+                      "items": {
+                        "$ref": "#/components/schemas/Ticket"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createTicket",
+        "summary": "Open a ticket",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTicket"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Ticket",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ticket"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tickets/{ticketId}": {
+      "get": {
+        "operationId": "getTicket",
+        "summary": "Read one ticket",
+        "parameters": [
+          {
+            "name": "ticketId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^HR-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$"
+            }
+          },
+          {
+            "name": "customerId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9-]{1,64}$"
+            }
+          },
+          {
+            "name": "contactId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9-]{1,64}$"
+            }
+          },
+          {
+            "name": "instanceId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9-]{1,64}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ticket",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ticket"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The ticket does not exist for this customer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "updateTicket",
+        "summary": "Change the description or category, or add a note",
+        "parameters": [
+          {
+            "name": "ticketId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^HR-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$"
+            }
+          },
+          {
+            "name": "customerId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9-]{1,64}$"
+            }
+          },
+          {
+            "name": "contactId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9-]{1,64}$"
+            }
+          },
+          {
+            "name": "instanceId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9-]{1,64}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateTicket"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ticket",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ticket"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The ticket does not exist for this customer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The ticket is closed or has too many notes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tickets/{ticketId}/close": {
+      "post": {
+        "operationId": "closeTicket",
+        "summary": "Close a ticket",
+        "parameters": [
+          {
+            "name": "ticketId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^HR-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$"
+            }
+          },
+          {
+            "name": "customerId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9-]{1,64}$"
+            }
+          },
+          {
+            "name": "contactId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9-]{1,64}$"
+            }
+          },
+          {
+            "name": "instanceId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9-]{1,64}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CloseTicket"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ticket",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ticket"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The ticket does not exist for this customer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The ticket cannot be closed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Ticket": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ticketId",
+          "customerId",
+          "category",
+          "subject",
+          "description",
+          "status",
+          "channel",
+          "contactId",
+          "createdAt",
+          "updatedAt",
+          "notes"
+        ],
+        "properties": {
+          "ticketId": {
+            "type": "string",
+            "pattern": "^HR-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$"
+          },
+          "customerId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9-]{1,64}$"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "trash-pickup",
+              "pothole",
+              "parking-permit",
+              "other"
+            ]
+          },
+          "subject": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "closed"
+            ]
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "VOICE",
+              "CHAT"
+            ]
+          },
+          "contactId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9-]{1,64}$"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "notes": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "at",
+                "text"
+              ],
+              "properties": {
+                "at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "text": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1000
+                }
+              }
+            }
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "message"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateTicket": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "customerId",
+          "category",
+          "subject",
+          "description",
+          "channel",
+          "contactId"
+        ],
+        "properties": {
+          "customerId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9-]{1,64}$"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "trash-pickup",
+              "pothole",
+              "parking-permit",
+              "other"
+            ]
+          },
+          "subject": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "VOICE",
+              "CHAT"
+            ]
+          },
+          "contactId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9-]{1,64}$"
+          },
+          "instanceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9-]{1,64}$"
+          }
+        }
+      },
+      "UpdateTicket": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "customerId"
+        ],
+        "properties": {
+          "customerId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9-]{1,64}$"
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "trash-pickup",
+              "pothole",
+              "parking-permit",
+              "other"
+            ]
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "contactId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9-]{1,64}$"
+          },
+          "instanceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9-]{1,64}$"
+          }
+        }
+      },
+      "CloseTicket": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "customerId"
+        ],
+        "properties": {
+          "customerId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9-]{1,64}$"
+          },
+          "contactId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9-]{1,64}$"
+          },
+          "instanceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9-]{1,64}$"
+          }
+        }
+      }
+    }
+  }
+}

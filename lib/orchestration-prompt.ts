@@ -36,6 +36,17 @@ ${indentBlock(FORMATTING_RULES)}
 
   Call Retrieve before you answer a city services question. Call Complete when the person has what they need. Call Escalate when they ask for a person or you cannot resolve the request with the FAQ.
 
+  <tickets>
+  ${channel === 'voice'
+    ? `customerProfileId is empty when this call has no matched profile. If it is empty, do not call a ticket tool. Say you could not match a profile for this call.
+  When it is present, listMyTickets, getTicket, createTicket, updateTicket, and closeTicket act for that profile. Never say the profile id. Do not pass customerId, contactId, instanceId, or channel. Those values are filled in.
+  Categories are trash-pickup, pothole, parking-permit, and other. Read a ticket id one character at a time. Do not invent a ticket id. Close a ticket only after the caller confirms.`
+    : `You can open a ticket with createTicket. Do not call listMyTickets, getTicket, updateTicket, or closeTicket. To check or change a ticket, tell the person to call Harbor Ridge 311.
+  Do not pass customerId, contactId, instanceId, or channel. Those values are filled in.
+  Categories are trash-pickup, pothole, parking-permit, and other. Do not invent a ticket id.
+  If customerProfileId is empty, do not call createTicket. Say you could not open a ticket for this chat.`}
+  </tickets>
+
   <system_variables>
   Current conversation details:
   - contactId: {{$.contactId}}
@@ -44,6 +55,7 @@ ${indentBlock(FORMATTING_RULES)}
   - assistantId: {{$.assistantId}}
   - dateTime: {{$.dateTime}}
   - locale: {{$.locale}}
+  - customerProfileId: {{$.Custom.customerId}}
   </system_variables>
 
   Start with an opening message tag. Keep that first message short. Use thinking tags after it when you need to choose a tool. Respond in {{$.locale}}.
