@@ -278,23 +278,20 @@ test('phone callers are matched by ANI and chat does not use email', () => {
 
   expect(block('branch-identity').Parameters.ComparisonValue).toBe('$.Channel');
   expect(block('branch-identity').Transitions.Conditions?.[0]).toMatchObject({
-    NextAction: 'create-profile-chat',
+    NextAction: 'set-chat-identity',
     Condition: { Operator: 'Equals', Operands: ['CHAT'] },
   });
   expect(block('branch-identity').Transitions.NextAction).toBe('check-caller-phone');
   expect(flow.Actions.some((action) => action.Identifier === 'check-chat-email')).toBe(false);
   expect(flow.Actions.some((action) => action.Identifier === 'find-profile-email')).toBe(false);
+  expect(flow.Actions.some((action) => action.Identifier === 'create-profile-chat')).toBe(false);
   expect(JSON.stringify(flow)).not.toContain('_email');
   expect(JSON.stringify(flow)).not.toContain('Attributes.email');
-  expect(block('create-profile-chat').Parameters.ProfileRequestData).toEqual({
-    AccountNumber: '$.ContactId',
-    FirstName: 'Resident',
-  });
-  expect(block('create-profile-chat').Transitions.Errors).toEqual([
-    { ErrorType: 'NoMatchingError', NextAction: 'create-assistant-session' },
-  ]);
+  expect(JSON.stringify(flow)).not.toContain('AccountNumber');
+  expect(JSON.stringify(block('set-chat-identity').Parameters)).toContain('"customerId":"$.ContactId"');
   expect(JSON.stringify(block('set-chat-identity').Parameters)).toContain('"identitySource":"chat"');
   expect(JSON.stringify(block('set-chat-identity').Parameters)).not.toContain('contactChannel');
+  expect(block('set-chat-identity').Transitions.NextAction).toBe('create-assistant-session');
   expect(block('check-caller-phone').Parameters.ComparisonValue).toBe('$.CustomerEndpoint.Address');
   expect(block('find-profile-phone').Parameters.ProfileRequestData).toEqual({
     IdentifierName: '_phone',

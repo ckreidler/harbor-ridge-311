@@ -124,7 +124,7 @@
         "NextAction": "check-caller-phone",
         "Conditions": [
           {
-            "NextAction": "create-profile-chat",
+            "NextAction": "set-chat-identity",
             "Condition": {
               "Operator": "Equals",
               "Operands": [
@@ -142,31 +142,11 @@
       }
     },
     {
-      "Identifier": "create-profile-chat",
-      "Type": "CreateCustomerProfile",
-      "Parameters": {
-        "ProfileRequestData": {
-          "AccountNumber": "$.ContactId",
-          "FirstName": "Resident"
-        }
-      },
-      "Transitions": {
-        "NextAction": "set-chat-identity",
-        "Conditions": [],
-        "Errors": [
-          {
-            "ErrorType": "NoMatchingError",
-            "NextAction": "create-assistant-session"
-          }
-        ]
-      }
-    },
-    {
       "Identifier": "set-chat-identity",
       "Type": "UpdateContactAttributes",
       "Parameters": {
         "Attributes": {
-          "customerId": "$.Customer.ProfileId",
+          "customerId": "$.ContactId",
           "identitySource": "chat"
         },
         "TargetContact": "Current"

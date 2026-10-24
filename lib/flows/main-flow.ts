@@ -119,18 +119,12 @@ export function mainFlow(props: MainFlowProps): CompiledFlow<typeof CONTACT_FLOW
         ComparisonValue: '$.Channel',
       }, {
         next: 'check-caller-phone',
-        conditions: [equals('CHAT', 'create-profile-chat')],
+        conditions: [equals('CHAT', 'set-chat-identity')],
         noMatch: 'check-caller-phone',
       }),
-      createCustomerProfile('create-profile-chat', {
-        ProfileRequestData: {
-          AccountNumber: '$.ContactId',
-          FirstName: 'Resident',
-        },
-      }, { next: 'set-chat-identity', error: 'create-assistant-session' }),
       updateContactAttributes('set-chat-identity', {
         Attributes: {
-          [CUSTOMER_ID_ATTRIBUTE]: '$.Customer.ProfileId',
+          [CUSTOMER_ID_ATTRIBUTE]: '$.ContactId',
           [IDENTITY_SOURCE_ATTRIBUTE]: IDENTITY_SOURCE_CHAT,
         },
         TargetContact: 'Current',

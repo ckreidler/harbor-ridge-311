@@ -97,10 +97,6 @@ export function isCustomerId(value: string): boolean {
   return ID_PATTERN.test(value);
 }
 
-export function isContactId(value: string): boolean {
-  return ID_PATTERN.test(value);
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -126,7 +122,7 @@ export function storedTicket(value: unknown): Ticket {
   if (typeof description !== 'string') throw new Error('stored description is invalid');
   if (typeof status !== 'string' || !isStatus(status)) throw new Error('stored status is invalid');
   if (typeof channel !== 'string' || !isChannel(channel)) throw new Error('stored channel is invalid');
-  if (typeof contactId !== 'string' || !isContactId(contactId)) throw new Error('stored contact id is invalid');
+  if (typeof contactId !== 'string' || !isCustomerId(contactId)) throw new Error('stored contact id is invalid');
   if (typeof createdAt !== 'string' || typeof updatedAt !== 'string') throw new Error('stored timestamp is invalid');
   if (!Array.isArray(notes)) throw new Error('stored notes are invalid');
   return {

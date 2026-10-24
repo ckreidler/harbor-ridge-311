@@ -7,7 +7,6 @@ flowchart TD
   n_lookup_prompts["lookup-prompts<br/>EvaluateDataTableValues"]
   n_play_greeting["play-greeting<br/>MessageParticipant"]
   n_branch_identity["branch-identity<br/>Compare"]
-  n_create_profile_chat["create-profile-chat<br/>CreateCustomerProfile"]
   n_set_chat_identity["set-chat-identity<br/>UpdateContactAttributes"]
   n_check_caller_phone["check-caller-phone<br/>Compare"]
   n_find_profile_phone["find-profile-phone<br/>GetCustomerProfile"]
@@ -44,10 +43,8 @@ flowchart TD
   n_lookup_prompts -->|"NoMatchingError"| n_play_fallback
   n_play_greeting -->|"next"| n_branch_identity
   n_play_greeting -->|"NoMatchingError"| n_play_fallback
-  n_branch_identity -->|"CHAT"| n_create_profile_chat
+  n_branch_identity -->|"CHAT"| n_set_chat_identity
   n_branch_identity -->|"NoMatchingCondition"| n_check_caller_phone
-  n_create_profile_chat -->|"next"| n_set_chat_identity
-  n_create_profile_chat -->|"NoMatchingError"| n_create_assistant_session
   n_set_chat_identity -->|"NoMatchingError"| n_create_assistant_session
   n_check_caller_phone -->|"Exists"| n_find_profile_phone
   n_check_caller_phone -->|"NoMatchingCondition"| n_create_assistant_session

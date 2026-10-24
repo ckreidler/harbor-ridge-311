@@ -4,7 +4,7 @@ import {
   IDENTITY_SOURCE_ANI,
   IDENTITY_SOURCE_ATTRIBUTE,
 } from './identity';
-import { isContactId, isCustomerId } from './model';
+import { isCustomerId } from './model';
 
 const ID_PATTERN = /^[A-Za-z0-9-]{1,64}$/;
 const READ_TOOLS = new Set(['getTicket', 'listMyTickets', 'updateTicket', 'closeTicket']);
@@ -106,7 +106,7 @@ export async function bindCustomer(event: unknown, lookup: ContactLookup): Promi
   const contactId = args?.contactId;
   const instanceId = args?.instanceId;
   const operation = operationName(params?.name);
-  if (!args || typeof contactId !== 'string' || typeof instanceId !== 'string' || !isContactId(contactId) || !ID_PATTERN.test(instanceId) || !operation) {
+  if (!args || typeof contactId !== 'string' || typeof instanceId !== 'string' || !isCustomerId(contactId) || !ID_PATTERN.test(instanceId) || !operation) {
     return reject(body.id, PROFILE_REQUIRED);
   }
   let verified: VerifiedContact;

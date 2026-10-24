@@ -5,7 +5,6 @@ import {
   TicketError,
   isCategory,
   isChannel,
-  isContactId,
   isCustomerId,
   isTicketId,
   ticketIdFromBytes,
@@ -171,7 +170,7 @@ export function requireCustomerId(value: unknown): string {
 }
 
 export function requireContactId(value: unknown): string {
-  if (typeof value !== 'string' || !isContactId(value)) {
+  if (typeof value !== 'string' || !isCustomerId(value)) {
     throw new TicketError(400, 'contactId is invalid');
   }
   return value;

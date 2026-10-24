@@ -14,6 +14,7 @@ import {
   TICKET_ID_ALPHABET,
   TicketError,
   canTransition,
+  isCustomerId,
   ticketIdFromBytes,
   transition,
   type Ticket,
@@ -106,6 +107,33 @@ async function api(
   if (!('statusCode' in result)) throw new Error('expected an API result');
   return { status: result.statusCode, body: JSON.parse(result.body) as Record<string, unknown> };
 }
+
+test('a contact UUID is a valid customer id', async () => {
+  const contactUuid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+  expect(isCustomerId(contactUuid)).toBe(true);
+  const store = new MemoryStore();
+  const created = await api(store, 'POST', '/tickets', createBody({
+    customerId: contactUuid,
+    contactId: contactUuid,
+    channel: 'CHAT',
+  }));
+  expect(created.status).toBe(201);
+  expect(created.body.customerId).toBe(contactUuid);
+  const contactResult = await handleTicketEvent({
+    Details: {
+      ContactData: {
+        Channel: 'CHAT',
+        ContactId: contactUuid,
+        Attributes: {
+          customerId: contactUuid,
+          ticketSubject: 'After hours',
+        },
+      },
+    },
+  }, store, clock, ids('HR-CDEFGH'));
+  expect(contactResult).toEqual({ ticketId: 'HR-CDEFGH' });
+  expect(store.tickets.get('HR-CDEFGH')?.customerId).toBe(contactUuid);
+});
 
 test('ticket ids use an unambiguous alphabet and reject biased bytes', () => {
   expect(TICKET_ID_ALPHABET).toHaveLength(31);
