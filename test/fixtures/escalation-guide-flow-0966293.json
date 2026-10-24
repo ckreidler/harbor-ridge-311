@@ -1,0 +1,84 @@
+{
+  "Version": "2019-10-30",
+  "StartAction": "show-escalation",
+  "Metadata": {
+    "entryPointPosition": {
+      "x": 40,
+      "y": 40
+    },
+    "ActionMetadata": {
+      "show-escalation": {
+        "position": {
+          "x": 160,
+          "y": 40
+        }
+      },
+      "disconnect": {
+        "position": {
+          "x": 440,
+          "y": 40
+        }
+      }
+    }
+  },
+  "Actions": [
+    {
+      "Identifier": "show-escalation",
+      "Type": "ShowView",
+      "Parameters": {
+        "ViewResource": {
+          "Id": "arn:aws:connect:us-west-2:aws:view/detail:1"
+        },
+        "InvocationTimeLimitSeconds": "400",
+        "ViewData": {
+          "Heading": "Harbor Ridge 311 escalation",
+          "AttributeBar": [
+            {
+              "Label": "Reason",
+              "Value": "$.Attributes.escalationReason"
+            },
+            {
+              "Label": "Summary",
+              "Value": "$.Attributes.escalationSummary"
+            },
+            {
+              "Label": "Customer intent",
+              "Value": "$.Attributes.customerIntent"
+            },
+            {
+              "Label": "Sentiment",
+              "Value": "$.Attributes.sentiment"
+            }
+          ],
+          "Back": {
+            "Label": "Close"
+          }
+        }
+      },
+      "Transitions": {
+        "NextAction": "disconnect",
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "disconnect"
+          },
+          {
+            "ErrorType": "NoMatchingCondition",
+            "NextAction": "disconnect"
+          },
+          {
+            "ErrorType": "TimeLimitExceeded",
+            "NextAction": "disconnect"
+          }
+        ],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "disconnect",
+      "Type": "DisconnectParticipant",
+      "Parameters": {},
+      "Transitions": {}
+    }
+  ]
+}

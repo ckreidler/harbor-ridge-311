@@ -43,8 +43,14 @@ interface FlowAction {
 
 interface FlowContent {
   StartAction: string;
-  Metadata: { ActionMetadata: Record<string, { position: { x: number; y: number } }> };
+  Metadata?: { ActionMetadata: Record<string, { position: { x: number; y: number } }> };
   Actions: FlowAction[];
+}
+
+function mainDocument(content: unknown): FlowContent {
+  const document = flowDocument(content);
+  expect(document.Metadata).toBeUndefined();
+  return document;
 }
 
 function flowDocument(content: unknown): FlowContent {
@@ -164,7 +170,7 @@ test('ConnectStack looks up the English prompts and associates the sandbox numbe
   const flow = contactFlow(template, 'HarborRidge311-Main');
   expect(flow.Properties.Type).toBe('CONTACT_FLOW');
 
-  const content = flowDocument(flow.Properties.Content);
+  const content = mainDocument(flow.Properties.Content);
   expect(content.Actions.some((action) => action.Type === 'GetParticipantInput')).toBe(false);
   expect(content.Actions.some((action) => action.Identifier === 'set-es-language')).toBe(false);
   expect(content.Actions.some((action) => action.Identifier === 'set-es-voice')).toBe(false);
@@ -206,8 +212,7 @@ test('ConnectStack looks up the English prompts and associates the sandbox numbe
     .toBe('Joanna');
   expect(content.Actions.find((action) => action.Identifier === 'enable-flow-logging')?.Transitions?.NextAction)
     .toBe('set-en-voice');
-  expect(content.Actions.map((action) => action.Identifier).every((id) => content.Metadata.ActionMetadata[id]?.position))
-    .toBe(true);
+  expect(content.Metadata).toBeUndefined();
   const recordIds = Object.keys(template.findResources('AWS::Connect::DataTableRecord'));
   const dependsOn = [flow.DependsOn].flat();
   expect(dependsOn).toEqual(expect.arrayContaining([...recordIds, 'LexBotIntegration', 'OrchestratorLambdaIntegration']));
@@ -578,7 +583,7 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
   }
 
   const flow = contactFlow(template, 'HarborRidge311-Main');
-  const content = flowDocument(flow.Properties.Content);
+  const content = mainDocument(flow.Properties.Content);
   const session = content.Actions.find((action) => action.Type === 'CreateWisdomSession');
   const lexBots = content.Actions.filter((action) => action.Type === 'ConnectParticipantWithLexBot');
   const toolCheck = content.Actions.find((action) => action.Identifier === 'check-tool');
@@ -628,8 +633,7 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
   expect(JSON.stringify(escalation?.Parameters)).toContain('"sentiment":"$.Lex.SessionAttributes.sentiment"');
   expect(content.Actions.find((action) => action.Identifier === 'play-greeting')?.Transitions?.NextAction)
     .toBe('create-assistant-session');
-  expect(content.Actions.map((action) => action.Identifier).every((id) => content.Metadata.ActionMetadata[id]?.position))
-    .toBe(true);
+  expect(content.Metadata).toBeUndefined();
 
   const associateStatements = policyStatements(template).filter((statement) => {
     const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action];
@@ -700,7 +704,7 @@ test('ConnectStack opens an after-hours case and removes voicemail', () => {
     })),
   });
 
-  const main = flowDocument(contactFlow(template, 'HarborRidge311-Main').Properties.Content);
+  const main = mainDocument(contactFlow(template, 'HarborRidge311-Main').Properties.Content);
   const logging = main.Actions.find((action) => action.Identifier === 'enable-flow-logging');
   const hoursCheck = main.Actions.find((action) => action.Identifier === 'check-hours');
   const block = (identifier: string) => {
@@ -1138,7 +1142,7 @@ test('ConnectStack transfers an in-hours escalation and keeps the agent password
   expect(mainRaw).toContain('GeneralQueue');
   expect(mainRaw).toContain('HoursOfOperationArn');
   expect(mainRaw).not.toContain('play-agent-placeholder');
-  const main = flowDocument(contactFlow(template, 'HarborRidge311-Main').Properties.Content);
+  const main = mainDocument(contactFlow(template, 'HarborRidge311-Main').Properties.Content);
   expect(main.Actions.find((action) => action.Identifier === 'set-event-flow')?.Transitions?.NextAction)
     .toBe('set-working-queue');
   expect(main.Actions.find((action) => action.Identifier === 'set-working-queue')?.Transitions?.NextAction)

@@ -39,7 +39,16 @@ const flowProps = {
 
 const queueProps = { dataTableId: 'table', holdMusicPromptArn: 'hold-music' };
 
-function reachable(flow: ReturnType<typeof mainFlow>, start: string): Set<string> {
+function reachable(flow: {
+  Actions: Array<{
+    Identifier: string;
+    Transitions: {
+      NextAction?: string;
+      Errors?: Array<{ NextAction: string }>;
+      Conditions?: Array<{ NextAction: string }>;
+    };
+  }>;
+}, start: string): Set<string> {
   const seen = new Set<string>();
   const pending = [start];
   while (pending.length > 0) {
@@ -69,9 +78,9 @@ const detailViewArn = 'arn:aws:connect:us-west-2:aws:view/detail:1';
 
 test('flow actions only use error branches their action type allows', () => {
   const flows = [
-    mainFlow(flowProps),
-    customerQueueFlow(queueProps),
-    escalationGuideFlow({ detailViewArn }),
+    mainFlow(flowProps).content,
+    customerQueueFlow(queueProps).content,
+    escalationGuideFlow({ detailViewArn }).content,
   ];
 
   for (const flow of flows) {
@@ -98,9 +107,9 @@ test('flow actions only use error branches their action type allows', () => {
 
 test('compare conditions do not use an empty-string operand', () => {
   const flows = [
-    mainFlow(flowProps),
-    customerQueueFlow(queueProps),
-    escalationGuideFlow({ detailViewArn }),
+    mainFlow(flowProps).content,
+    customerQueueFlow(queueProps).content,
+    escalationGuideFlow({ detailViewArn }).content,
   ];
   for (const flow of flows) {
     for (const action of flow.Actions) {
@@ -114,54 +123,8 @@ test('compare conditions do not use an empty-string operand', () => {
   }
 });
 
-test('main flow block positions leave space between every block', () => {
-  const flow = mainFlow(flowProps);
-  const mainPath = [
-    'enable-flow-logging',
-    'set-en-voice',
-    'lookup-prompts',
-    'play-greeting',
-    'create-assistant-session',
-    'select-orchestrator',
-    'ask-en-question',
-    'check-tool',
-  ];
-  const position = (id: string) => {
-    const found = flow.Metadata.ActionMetadata[id]?.position;
-    if (!found) {
-      throw new Error(`missing position for ${id}`);
-    }
-    return found;
-  };
-
-  for (let index = 0; index < mainPath.length - 1; index += 1) {
-    const left = position(mainPath[index]);
-    const right = position(mainPath[index + 1]);
-    expect(right.y).toBe(left.y);
-    expect(right.x - left.x).toBeGreaterThanOrEqual(250);
-    expect(right.x - left.x).toBeLessThanOrEqual(300);
-  }
-
-  const greeting = position('play-greeting');
-  const fallback = position('play-fallback');
-  expect(fallback.x).toBe(greeting.x);
-  expect(fallback.y - greeting.y).toBeGreaterThanOrEqual(250);
-
-  const ids = flow.Actions.map((action) => action.Identifier);
-  expect(new Set(Object.keys(flow.Metadata.ActionMetadata))).toEqual(new Set(ids));
-  for (let left = 0; left < ids.length; left += 1) {
-    for (let right = left + 1; right < ids.length; right += 1) {
-      const a = position(ids[left]);
-      const b = position(ids[right]);
-      const dx = Math.abs(a.x - b.x);
-      const dy = Math.abs(a.y - b.y);
-      expect(dx >= 250 || dy >= 250).toBe(true);
-    }
-  }
-});
-
 test('main flow looks up prompt text by channel and plays the greeting on success', () => {
-  const flow = mainFlow(flowProps);
+  const flow = mainFlow(flowProps).content;
   const block = (identifier: string) => {
     const found = flow.Actions.find((action) => action.Identifier === identifier);
     if (!found) {
@@ -226,7 +189,7 @@ test('main flow looks up prompt text by channel and plays the greeting on succes
 });
 
 test('in-hours escalation sets the agent guide before transferring to the queue', () => {
-  const flow = mainFlow(flowProps);
+  const flow = mainFlow(flowProps).content;
   const block = (identifier: string) => {
     const found = flow.Actions.find((action) => action.Identifier === identifier);
     if (!found) {
@@ -286,7 +249,7 @@ test('in-hours escalation sets the agent guide before transferring to the queue'
   expect(flow.Actions.filter((action) => action.Type === 'CreateWisdomSession')).toHaveLength(1);
   expect(block('create-assistant-session').Transitions.NextAction).toBe('select-orchestrator');
 
-  const guide = escalationGuideFlow({ detailViewArn });
+  const guide = escalationGuideFlow({ detailViewArn }).content;
   const show = guide.Actions.find((action) => action.Identifier === 'show-escalation');
   const view = JSON.stringify(show);
   expect(show?.Type).toBe('ShowView');
@@ -306,7 +269,7 @@ test('in-hours escalation sets the agent guide before transferring to the queue'
 });
 
 test('after-hours escalation creates a case, speaks the reference, and disconnects', () => {
-  const flow = mainFlow(flowProps);
+  const flow = mainFlow(flowProps).content;
   const block = (identifier: string) => {
     const found = flow.Actions.find((action) => action.Identifier === identifier);
     if (!found) {
@@ -447,25 +410,12 @@ test('after-hours escalation creates a case, speaks the reference, and disconnec
   });
   expect(block('check-case-title').Transitions.Conditions?.[0].Condition.Operands).toEqual([]);
   expect(block('check-case-prompt').Transitions.Conditions?.[0].Condition.Operator).toBe('Exists');
-  expect(flow.Actions.some((action) => action.Type === 'TransferToFlow')).toBe(false);
-  expect(flow.Actions.some((action) => action.Type === 'UpdateContactRecordingBehavior')).toBe(false);
-
-  const ids = flow.Actions.map((action) => action.Identifier);
-  for (let left = 0; left < ids.length; left += 1) {
-    for (let right = left + 1; right < ids.length; right += 1) {
-      const a = flow.Metadata.ActionMetadata[ids[left]].position;
-      const b = flow.Metadata.ActionMetadata[ids[right]].position;
-      const dx = Math.abs(a.x - b.x);
-      const dy = Math.abs(a.y - b.y);
-      expect(dx >= 280 || dy >= 280).toBe(true);
-      expect(a.x % 280).toBe(160 % 280);
-      expect(b.x % 280).toBe(160 % 280);
-    }
-  }
+  expect(JSON.stringify(flow.Actions)).not.toContain('TransferToFlow');
+  expect(JSON.stringify(flow.Actions)).not.toContain('UpdateContactRecordingBehavior');
 });
 
 test('customer queue flow covers chat and voice', () => {
-  const flow = customerQueueFlow(queueProps);
+  const flow = customerQueueFlow(queueProps).content;
   const block = (identifier: string) => {
     const found = flow.Actions.find((action) => action.Identifier === identifier);
     if (!found) {
@@ -538,9 +488,9 @@ test('customer queue flow covers chat and voice', () => {
 
 test('wait actions use TimeLimitSeconds', () => {
   const flows = [
-    mainFlow(flowProps),
-    customerQueueFlow(queueProps),
-    escalationGuideFlow({ detailViewArn }),
+    mainFlow(flowProps).content,
+    customerQueueFlow(queueProps).content,
+    escalationGuideFlow({ detailViewArn }).content,
   ];
   const waits = flows.flatMap((flow) => flow.Actions.filter((action) => action.Type === 'Wait'));
   expect(waits.length).toBeGreaterThan(0);
@@ -556,24 +506,8 @@ test('wait actions use TimeLimitSeconds', () => {
       },
     ]);
   }
-  const queueWait = customerQueueFlow(queueProps).Actions.find((action) => action.Identifier === 'wait-in-queue');
+  const queueWait = customerQueueFlow(queueProps).content.Actions.find((action) => action.Identifier === 'wait-in-queue');
   expect(queueWait?.Parameters.TimeLimitSeconds).toBe('180');
   expect(queueWait?.Transitions.NextAction).toBe('wait-in-queue');
   expect(queueWait?.Transitions.Conditions?.[0].NextAction).toBe('wait-in-queue');
-});
-
-test('queue blocks sit on a 280 pixel grid', () => {
-  for (const flow of [customerQueueFlow(queueProps)]) {
-    const ids = flow.Actions.map((action) => action.Identifier);
-    expect(new Set(Object.keys(flow.Metadata.ActionMetadata))).toEqual(new Set(ids));
-    for (let left = 0; left < ids.length; left += 1) {
-      for (let right = left + 1; right < ids.length; right += 1) {
-        const a = flow.Metadata.ActionMetadata[ids[left]].position;
-        const b = flow.Metadata.ActionMetadata[ids[right]].position;
-        const dx = Math.abs(a.x - b.x);
-        const dy = Math.abs(a.y - b.y);
-        expect(dx >= 280 || dy >= 280).toBe(true);
-      }
-    }
-  }
 });

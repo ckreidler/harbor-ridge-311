@@ -16,14 +16,15 @@ import * as wisdom from 'aws-cdk-lib/aws-wisdom';
 import * as cdk from 'aws-cdk-lib/core';
 import * as cr from 'aws-cdk-lib/custom-resources';
 import { Construct } from 'constructs';
-import { escalationGuideFlow } from './flows/escalation-guide-flow';
+import { ESCALATION_GUIDE_FLOW_NAME, escalationGuideFlow } from './flows/escalation-guide-flow';
 import {
   AFTER_HOURS_CASE_CHAT_TEXT,
   AFTER_HOURS_CASE_TEXT_AFTER,
   AFTER_HOURS_CASE_VOICE_TEXT,
+  MAIN_FLOW_NAME,
   mainFlow,
 } from './flows/main-flow';
-import { customerQueueFlow, QUEUE_CHAT_TEXT, QUEUE_VOICE_TEXT } from './flows/queue-flow';
+import { customerQueueFlow, QUEUE_CHAT_TEXT, QUEUE_FLOW_NAME, QUEUE_VOICE_TEXT } from './flows/queue-flow';
 import { ORCHESTRATION_MODEL_ID, orchestrationPrompt } from './orchestration-prompt';
 import { SELF_SERVICE_USE_CASE } from './select-orchestrator';
 
@@ -888,14 +889,15 @@ export class ConnectStack extends cdk.Stack {
     );
     serviceRequest.node.addDependency(requestCategoryOptions);
 
+    const customerQueue = customerQueueFlow({
+      dataTableId,
+      holdMusicPromptArn: cdk.Fn.join('', [instanceArn, '/prompt/', CUSTOMER_QUEUE_PROMPT_ID]),
+    });
     const queueFlow = new connect.CfnContactFlow(this, 'QueueFlow', {
       instanceArn,
-      name: 'HarborRidge311-Queue',
-      type: 'CUSTOMER_QUEUE',
-      content: cdk.Fn.toJsonString(customerQueueFlow({
-        dataTableId,
-        holdMusicPromptArn: cdk.Fn.join('', [instanceArn, '/prompt/', CUSTOMER_QUEUE_PROMPT_ID]),
-      })),
+      name: QUEUE_FLOW_NAME,
+      type: customerQueue.type,
+      content: cdk.Fn.toJsonString(customerQueue.content),
     });
     const promptRow = (id: string) => {
       const found = promptRows.find((record) => record.node.id === id);
@@ -906,37 +908,39 @@ export class ConnectStack extends cdk.Stack {
     };
     queueFlow.node.addDependency(promptRow('QueueCHAT'), promptRow('QueueVOICE'));
 
+    const guide = escalationGuideFlow({
+      detailViewArn: cdk.Fn.join('', [
+        'arn:',
+        cdk.Aws.PARTITION,
+        ':connect:',
+        cdk.Aws.REGION,
+        ':aws:view/detail:1',
+      ]),
+    });
     const escalationGuide = new connect.CfnContactFlow(this, 'EscalationGuide', {
       instanceArn,
-      name: 'HarborRidge311-EscalationGuide',
-      type: 'CONTACT_FLOW',
-      content: cdk.Fn.toJsonString(escalationGuideFlow({
-        detailViewArn: cdk.Fn.join('', [
-          'arn:',
-          cdk.Aws.PARTITION,
-          ':connect:',
-          cdk.Aws.REGION,
-          ':aws:view/detail:1',
-        ]),
-      })),
+      name: ESCALATION_GUIDE_FLOW_NAME,
+      type: guide.type,
+      content: cdk.Fn.toJsonString(guide.content),
     });
 
+    const main = mainFlow({
+      dataTableId,
+      wisdomAssistantArn: assistantArn,
+      lexBotAliasArn: botAlias.attrArn,
+      orchestratorLambdaArn: selectOrchestrator.functionArn,
+      hoursOfOperationArn: hoursOfOperation.attrHoursOfOperationArn,
+      queueArn: queue.attrQueueArn,
+      escalationGuideFlowArn: escalationGuide.attrContactFlowArn,
+      customerQueueFlowArn: queueFlow.attrContactFlowArn,
+      caseTemplateId: serviceRequest.attrTemplateId,
+      requestCategoryFieldId: REQUEST_CATEGORY_FIELD_ID,
+    });
     const flow = new connect.CfnContactFlow(this, 'MainFlow', {
       instanceArn,
-      name: 'HarborRidge311-Main',
-      type: 'CONTACT_FLOW',
-      content: cdk.Fn.toJsonString(mainFlow({
-        dataTableId,
-        wisdomAssistantArn: assistantArn,
-        lexBotAliasArn: botAlias.attrArn,
-        orchestratorLambdaArn: selectOrchestrator.functionArn,
-        hoursOfOperationArn: hoursOfOperation.attrHoursOfOperationArn,
-        queueArn: queue.attrQueueArn,
-        escalationGuideFlowArn: escalationGuide.attrContactFlowArn,
-        customerQueueFlowArn: queueFlow.attrContactFlowArn,
-        caseTemplateId: serviceRequest.attrTemplateId,
-        requestCategoryFieldId: REQUEST_CATEGORY_FIELD_ID,
-      })),
+      name: MAIN_FLOW_NAME,
+      type: main.type,
+      content: cdk.Fn.toJsonString(main.content),
     });
     flow.node.addDependency(...promptRows, lexAssociation, orchestratorAssociation, caseReasonOptions);
     setDefaultAgent.node.addDependency(botAlias, flow);

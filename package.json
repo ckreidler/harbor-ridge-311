@@ -7,6 +7,7 @@
     "build:site": "npm run build --prefix website",
     "watch": "tsc -w",
     "test": "jest",
+    "diagrams": "tsx bin/diagrams.ts",
     "cdk": "cdk",
     "cfn-lint": "cdk synth --quiet && cfn-lint --non-zero-exit-code error cdk.out/WebsiteStack.template.json cdk.out/ConnectStack.template.json cdk.out/TouchpointStack.template.json"
   },

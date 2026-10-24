@@ -1,0 +1,258 @@
+{
+  "Version": "2019-10-30",
+  "StartAction": "branch-channel",
+  "Metadata": {
+    "entryPointPosition": {
+      "x": 40,
+      "y": 40
+    },
+    "ActionMetadata": {
+      "branch-channel": {
+        "position": {
+          "x": 160,
+          "y": 40
+        }
+      },
+      "lookup-queue-chat": {
+        "position": {
+          "x": 440,
+          "y": 40
+        }
+      },
+      "play-queue-chat": {
+        "position": {
+          "x": 720,
+          "y": 40
+        }
+      },
+      "wait-in-queue": {
+        "position": {
+          "x": 1000,
+          "y": 40
+        }
+      },
+      "play-queue-fallback": {
+        "position": {
+          "x": 720,
+          "y": 320
+        }
+      },
+      "lookup-queue-voice": {
+        "position": {
+          "x": 440,
+          "y": 600
+        }
+      },
+      "loop-hold": {
+        "position": {
+          "x": 720,
+          "y": 600
+        }
+      },
+      "loop-hold-fallback": {
+        "position": {
+          "x": 1000,
+          "y": 600
+        }
+      }
+    }
+  },
+  "Actions": [
+    {
+      "Identifier": "branch-channel",
+      "Type": "Compare",
+      "Parameters": {
+        "ComparisonValue": "$.Channel"
+      },
+      "Transitions": {
+        "NextAction": "lookup-queue-voice",
+        "Conditions": [
+          {
+            "NextAction": "lookup-queue-chat",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": [
+                "CHAT"
+              ]
+            }
+          }
+        ],
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingCondition",
+            "NextAction": "lookup-queue-voice"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "lookup-queue-chat",
+      "Type": "EvaluateDataTableValues",
+      "Parameters": {
+        "DataTableId": "table",
+        "Queries": [
+          {
+            "QueryName": "QueueChat",
+            "Attributes": [
+              "Text"
+            ],
+            "PrimaryValues": [
+              {
+                "AttributeName": "Prompt",
+                "Value": "Queue"
+              },
+              {
+                "AttributeName": "Channel",
+                "Value": "$.Channel"
+              }
+            ]
+          }
+        ]
+      },
+      "Transitions": {
+        "NextAction": "play-queue-chat",
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "play-queue-fallback"
+          }
+        ],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "play-queue-chat",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "$.DataTables.QueueChat.Text"
+      },
+      "Transitions": {
+        "NextAction": "wait-in-queue",
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "play-queue-fallback"
+          }
+        ],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "play-queue-fallback",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "Thanks for waiting. You're in line and the next available person will join this chat shortly."
+      },
+      "Transitions": {
+        "NextAction": "wait-in-queue",
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "wait-in-queue"
+          }
+        ],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "wait-in-queue",
+      "Type": "Wait",
+      "Parameters": {
+        "TimeLimitSeconds": "180"
+      },
+      "Transitions": {
+        "NextAction": "wait-in-queue",
+        "Conditions": [
+          {
+            "NextAction": "wait-in-queue",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": [
+                "WaitCompleted"
+              ]
+            }
+          }
+        ],
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "wait-in-queue"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "lookup-queue-voice",
+      "Type": "EvaluateDataTableValues",
+      "Parameters": {
+        "DataTableId": "table",
+        "Queries": [
+          {
+            "QueryName": "QueueVoice",
+            "Attributes": [
+              "Text"
+            ],
+            "PrimaryValues": [
+              {
+                "AttributeName": "Prompt",
+                "Value": "Queue"
+              },
+              {
+                "AttributeName": "Channel",
+                "Value": "$.Channel"
+              }
+            ]
+          }
+        ]
+      },
+      "Transitions": {
+        "NextAction": "loop-hold",
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "loop-hold-fallback"
+          }
+        ],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "loop-hold",
+      "Type": "MessageParticipantIteratively",
+      "Parameters": {
+        "Messages": [
+          {
+            "Text": "$.DataTables.QueueVoice.Text"
+          },
+          {
+            "PromptId": "hold-music"
+          }
+        ]
+      },
+      "Transitions": {
+        "NextAction": "loop-hold",
+        "Errors": [],
+        "Conditions": []
+      }
+    },
+    {
+      "Identifier": "loop-hold-fallback",
+      "Type": "MessageParticipantIteratively",
+      "Parameters": {
+        "Messages": [
+          {
+            "Text": "Thanks for waiting. The next available person will be with you shortly."
+          },
+          {
+            "PromptId": "hold-music"
+          }
+        ]
+      },
+      "Transitions": {
+        "NextAction": "loop-hold-fallback",
+        "Errors": [],
+        "Conditions": []
+      }
+    }
+  ]
+}
