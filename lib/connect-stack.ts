@@ -548,6 +548,7 @@ export class ConnectStack extends cdk.Stack {
         physicalResourceId: cr.PhysicalResourceId.of(`HarborRidge311-${id}`),
       };
       return new cr.AwsCustomResource(this, id, {
+        memorySize: 512,
         installLatestAwsSdk: true,
         onCreate: associateCall,
         onUpdate: associateCall,
@@ -588,6 +589,7 @@ export class ConnectStack extends cdk.Stack {
       physicalResourceId: cr.PhysicalResourceId.of('HarborRidge311-SelfServiceOrchestrator'),
     };
     const setDefaultAgent = new cr.AwsCustomResource(this, 'SetDefaultOrchestrationAgent', {
+      memorySize: 512,
       installLatestAwsSdk: true,
       onCreate: setDefaultAgentCall,
       onUpdate: setDefaultAgentCall,
@@ -890,6 +892,7 @@ export class ConnectStack extends cdk.Stack {
     };
 
     new cr.AwsCustomResource(this, 'AssociatePhoneNumber', {
+      memorySize: 512,
       onCreate: associateCall,
       onUpdate: associateCall,
       onDelete: {

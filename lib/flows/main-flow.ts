@@ -22,7 +22,13 @@ import {
   type CompiledFlow,
   type DataTableQuery,
 } from '../flow';
-import { IDENTITY_SOURCE_ANI, IDENTITY_SOURCE_CHAT } from '../tickets/identity';
+import {
+  CONTACT_CHANNEL_ATTRIBUTE,
+  CUSTOMER_ID_ATTRIBUTE,
+  IDENTITY_SOURCE_ANI,
+  IDENTITY_SOURCE_ATTRIBUTE,
+  IDENTITY_SOURCE_CHAT,
+} from '../tickets/identity';
 
 export interface MainFlowProps {
   dataTableId: string;
@@ -94,7 +100,15 @@ export function mainFlow(props: MainFlowProps): CompiledFlow<typeof CONTACT_FLOW
     actions: [
       updateFlowLoggingBehavior('enable-flow-logging', {
         FlowLoggingBehavior: 'Enabled',
-      }, { next: 'set-en-voice' }),
+      }, { next: 'clear-identity' }),
+      updateContactAttributes('clear-identity', {
+        Attributes: {
+          [CUSTOMER_ID_ATTRIBUTE]: '',
+          [IDENTITY_SOURCE_ATTRIBUTE]: '',
+          [CONTACT_CHANNEL_ATTRIBUTE]: '',
+        },
+        TargetContact: 'Current',
+      }, { next: 'set-en-voice', error: 'set-en-voice' }),
       updateContactTextToSpeechVoice('set-en-voice', {
         TextToSpeechVoice: 'Joanna',
         TextToSpeechEngine: 'Neural',
@@ -125,9 +139,9 @@ export function mainFlow(props: MainFlowProps): CompiledFlow<typeof CONTACT_FLOW
       }, { next: 'set-chat-identity', error: 'create-assistant-session' }),
       updateContactAttributes('set-chat-identity', {
         Attributes: {
-          customerId: '$.Customer.ProfileId',
-          identitySource: IDENTITY_SOURCE_CHAT,
-          contactChannel: '$.Channel',
+          [CUSTOMER_ID_ATTRIBUTE]: '$.Customer.ProfileId',
+          [IDENTITY_SOURCE_ATTRIBUTE]: IDENTITY_SOURCE_CHAT,
+          [CONTACT_CHANNEL_ATTRIBUTE]: '$.Channel',
         },
         TargetContact: 'Current',
       }, { next: 'create-assistant-session', error: 'create-assistant-session' }),
@@ -154,9 +168,9 @@ export function mainFlow(props: MainFlowProps): CompiledFlow<typeof CONTACT_FLOW
       }, { next: 'set-customer-id', error: 'create-assistant-session' }),
       updateContactAttributes('set-customer-id', {
         Attributes: {
-          customerId: '$.Customer.ProfileId',
-          identitySource: IDENTITY_SOURCE_ANI,
-          contactChannel: '$.Channel',
+          [CUSTOMER_ID_ATTRIBUTE]: '$.Customer.ProfileId',
+          [IDENTITY_SOURCE_ATTRIBUTE]: IDENTITY_SOURCE_ANI,
+          [CONTACT_CHANNEL_ATTRIBUTE]: '$.Channel',
         },
         TargetContact: 'Current',
       }, { next: 'create-assistant-session', error: 'create-assistant-session' }),

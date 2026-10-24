@@ -9,7 +9,29 @@
         "FlowLoggingBehavior": "Enabled"
       },
       "Transitions": {
-        "NextAction": "set-en-voice"
+        "NextAction": "clear-identity"
+      }
+    },
+    {
+      "Identifier": "clear-identity",
+      "Type": "UpdateContactAttributes",
+      "Parameters": {
+        "Attributes": {
+          "customerId": "",
+          "identitySource": "",
+          "contactChannel": ""
+        },
+        "TargetContact": "Current"
+      },
+      "Transitions": {
+        "NextAction": "set-en-voice",
+        "Conditions": [],
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "set-en-voice"
+          }
+        ]
       }
     },
     {

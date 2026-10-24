@@ -164,6 +164,7 @@ export function addTickets(stack: cdk.Stack, instanceArn: string, instanceId: st
   }
 
   const discovery = new cr.AwsCustomResource(stack, 'TicketDiscoveryUrl', {
+    memorySize: 512,
     installLatestAwsSdk: false,
     onCreate: {
       service: 'connect',
@@ -267,11 +268,12 @@ export function addTickets(stack: cdk.Stack, instanceArn: string, instanceId: st
         },
       },
       interceptorConfigurations: gatewayConfig.interceptorConfigurations,
-      gatewayConfigHash: cdk.Fn.toJsonString(gatewayConfig),
+      gatewayConfig: cdk.Fn.toJsonString(gatewayConfig),
     },
     physicalResourceId: cr.PhysicalResourceId.of(gateway.attrGatewayIdentifier),
   };
   const audience = new cr.AwsCustomResource(stack, 'TicketGatewayAudience', {
+    memorySize: 512,
     installLatestAwsSdk: true,
     timeout: cdk.Duration.minutes(5),
     onCreate: audienceCall,

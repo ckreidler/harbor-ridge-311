@@ -159,7 +159,13 @@ test('main flow looks up prompt text by channel and plays the greeting on succes
   expect(flow.Actions.some((action) => action.Identifier === 'check-prompt')).toBe(false);
   expect(flow.Actions.some((action) => action.Identifier === 'set-en-language')).toBe(false);
   expect(JSON.stringify(flow)).not.toContain('LanguageCode');
-  expect(block('enable-flow-logging').Transitions.NextAction).toBe('set-en-voice');
+  expect(block('enable-flow-logging').Transitions.NextAction).toBe('clear-identity');
+  expect(block('clear-identity').Parameters.Attributes).toEqual({
+    customerId: '',
+    identitySource: '',
+    contactChannel: '',
+  });
+  expect(block('clear-identity').Transitions.NextAction).toBe('set-en-voice');
   expect(block('play-greeting').Transitions).toMatchObject({
     NextAction: 'branch-identity',
     Errors: [{ ErrorType: 'NoMatchingError', NextAction: 'play-fallback' }],

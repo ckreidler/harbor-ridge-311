@@ -360,6 +360,15 @@ test('the request interceptor overwrites customerId and blocks chat reads', asyn
     params: { arguments: { customerId: 'chat-profile', channel: 'CHAT' } },
   });
 
+  const cleared = await bindCustomer(callEvent('createTicket', args), async () => ({
+    customerId: '',
+    identitySource: '',
+    contactChannel: '',
+  }));
+  expect(cleared.mcp.transformedGatewayResponse?.body).toMatchObject({
+    error: { code: -32602, message: 'A verified customer profile is required.' },
+  });
+
   const missing = await bindCustomer(callEvent('getTicket', args), async () => ({
     customerId: undefined,
     identitySource: undefined,

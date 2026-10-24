@@ -34,6 +34,7 @@ interface FlowAction {
       Attributes: string[];
       PrimaryValues: Array<{ AttributeName: string; Value: string }>;
     }>;
+    Attributes?: Record<string, string>;
   };
   Transitions?: {
     NextAction?: string;
@@ -212,6 +213,8 @@ test('ConnectStack looks up the English prompts and associates the sandbox numbe
   expect(content.Actions.find((action) => action.Identifier === 'set-en-voice')?.Parameters?.TextToSpeechVoice)
     .toBe('Joanna');
   expect(content.Actions.find((action) => action.Identifier === 'enable-flow-logging')?.Transitions?.NextAction)
+    .toBe('clear-identity');
+  expect(content.Actions.find((action) => action.Identifier === 'clear-identity')?.Transitions?.NextAction)
     .toBe('set-en-voice');
   expect(content.Metadata).toBeUndefined();
   const recordIds = Object.keys(template.findResources('AWS::Connect::DataTableRecord'));
@@ -741,7 +744,12 @@ test('ConnectStack opens an after-hours case and removes voicemail', () => {
     return found;
   };
   expect(main.StartAction).toBe('enable-flow-logging');
-  expect(logging?.Transitions?.NextAction).toBe('set-en-voice');
+  expect(logging?.Transitions?.NextAction).toBe('clear-identity');
+  expect(main.Actions.find((action) => action.Identifier === 'clear-identity')?.Parameters?.Attributes).toEqual({
+    customerId: '',
+    identitySource: '',
+    contactChannel: '',
+  });
   expect(main.Actions.some((action) => action.Identifier === 'set-en-language')).toBe(false);
   expect(hoursCheck?.Type).toBe('CheckHoursOfOperation');
   expect(hoursCheck?.Transitions?.Conditions?.find((branch) => branch.Condition.Operands[0] === 'True')?.NextAction)
@@ -955,7 +963,13 @@ test('ConnectStack stores customer-scoped tickets behind an IAM API and a JWT ga
   const audienceResource = customResources.find((resource) => JSON.stringify(resource).includes('updateGateway'));
   expect(discoveryResource?.Properties.InstallLatestAwsSdk).toBe(false);
   expect(audienceResource?.Properties.InstallLatestAwsSdk).toBe(true);
-  expect(JSON.stringify(audienceResource)).toContain('gatewayConfigHash');
+  const audienceText = JSON.stringify(audienceResource);
+  expect(audienceText).toContain('gatewayConfig');
+  expect(audienceText).not.toContain('gatewayConfigHash');
+  const customResourceHandler = Object.entries(template.findResources('AWS::Lambda::Function')).find(([id]) => (
+    id.startsWith('AWS679f53fac002430cb0da5b7982bd2287')
+  ))?.[1] as { Properties: { MemorySize?: number } } | undefined;
+  expect(customResourceHandler?.Properties.MemorySize).toBe(512);
 
   const ticketActions = policyStatements(template).filter((statement) => {
     const actions = [statement.Action].flat();
