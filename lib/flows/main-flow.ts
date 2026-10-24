@@ -1,4 +1,5 @@
 import {
+  CONTACT_FLOW,
   checkHoursOfOperation,
   compare,
   connectParticipantWithLexBot,
@@ -21,7 +22,6 @@ import {
   wait,
   type DataTableQuery,
   type FlowContent,
-  type InboundContactAction,
 } from '../flow';
 
 export interface MainFlowProps {
@@ -87,6 +87,7 @@ export function mainFlow(props: MainFlowProps): FlowContent {
 
   return flow({
     name: MAIN_FLOW_NAME,
+    type: CONTACT_FLOW,
     start: 'enable-flow-logging',
     actions: [
       updateFlowLoggingBehavior('enable-flow-logging', {
@@ -274,6 +275,6 @@ export function mainFlow(props: MainFlowProps): FlowContent {
         Text: `${VOICE_GREETING} ${VOICE_GOODBYE}`,
       }, { next: 'disconnect', error: 'disconnect' }),
       disconnectParticipant('disconnect'),
-    ] satisfies readonly InboundContactAction[],
+    ],
   });
 }

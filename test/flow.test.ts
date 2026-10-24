@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as cdk from 'aws-cdk-lib/core';
-import { disconnectParticipant, flow, messageParticipant } from '../lib/flow';
+import { CONTACT_FLOW, CUSTOMER_QUEUE, disconnectParticipant, flow, messageParticipant } from '../lib/flow';
 import { escalationGuideFlow } from '../lib/flows/escalation-guide-flow';
 import { mainFlow } from '../lib/flows/main-flow';
 import { customerQueueFlow } from '../lib/flows/queue-flow';
@@ -48,9 +48,9 @@ test('builder escalation guide matches the hand-written flow except Metadata', (
 
 test('action identifiers are the action keys and stay stable across compiles', () => {
   const actions = [disconnectParticipant('end')];
-  const first = flow({ name: 'Test', start: 'end', actions });
-  expect(flow({ name: 'Test', start: 'end', actions })).toEqual(first);
-  expect(flow({ name: 'Other', start: 'end', actions })).toEqual(first);
+  const first = flow({ type: CONTACT_FLOW, name: 'Test', start: 'end', actions });
+  expect(flow({ type: CONTACT_FLOW, name: 'Test', start: 'end', actions })).toEqual(first);
+  expect(flow({ type: CONTACT_FLOW, name: 'Other', start: 'end', actions })).toEqual(first);
   expect(first.StartAction).toBe('end');
   expect(first.Actions.map((action) => action.Identifier)).toEqual(['end']);
 
@@ -62,6 +62,7 @@ test('action identifiers are the action keys and stay stable across compiles', (
 
 test('flow() rejects a dangling transition', () => {
   expect(() => flow({
+    type: CONTACT_FLOW,
     name: 'Test',
     start: 'greet',
     actions: [
@@ -73,6 +74,7 @@ test('flow() rejects a dangling transition', () => {
 
 test('flow() rejects an unreachable action', () => {
   expect(() => flow({
+    type: CONTACT_FLOW,
     name: 'Test',
     start: 'end',
     actions: [
@@ -84,6 +86,7 @@ test('flow() rejects an unreachable action', () => {
 
 test('flow() rejects a duplicate action key', () => {
   expect(() => flow({
+    type: CONTACT_FLOW,
     name: 'Test',
     start: 'end',
     actions: [
@@ -95,6 +98,7 @@ test('flow() rejects a duplicate action key', () => {
 
 test('flow() rejects a missing start action', () => {
   expect(() => flow({
+    type: CONTACT_FLOW,
     name: 'Test',
     start: 'missing',
     actions: [disconnectParticipant('end')],
@@ -103,6 +107,7 @@ test('flow() rejects a missing start action', () => {
 
 test('flow() rejects an action key that is not a valid Identifier', () => {
   const reject = (key: string) => expect(() => flow({
+    type: CONTACT_FLOW,
     name: 'Test',
     start: key,
     actions: [disconnectParticipant(key)],
@@ -115,6 +120,7 @@ test('flow() rejects an action key that is not a valid Identifier', () => {
 
   const limit = 'a'.repeat(50);
   expect(flow({
+    type: CONTACT_FLOW,
     name: 'Test',
     start: limit,
     actions: [disconnectParticipant(limit)],
@@ -124,13 +130,27 @@ test('flow() rejects an action key that is not a valid Identifier', () => {
 test('flow() rejects a token flow name or action key', () => {
   const token = cdk.Fn.join('-', ['Harbor', 'Main']);
   expect(() => flow({
+    type: CONTACT_FLOW,
     name: token,
     start: 'end',
     actions: [disconnectParticipant('end')],
   })).toThrow('flow name must be a literal string, not a token');
   expect(() => flow({
+    type: CONTACT_FLOW,
     name: 'Test',
     start: token,
     actions: [disconnectParticipant(token)],
   })).toThrow('is a token');
+});
+
+test('CUSTOMER_QUEUE rejects disconnectParticipant', () => {
+  flow({
+    name: 'Queue',
+    type: CUSTOMER_QUEUE,
+    start: 'end',
+    actions: [
+      // @ts-expect-error disconnectParticipant is not a customer queue action
+      disconnectParticipant('end'),
+    ],
+  });
 });

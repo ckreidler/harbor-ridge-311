@@ -16,6 +16,7 @@ import * as wisdom from 'aws-cdk-lib/aws-wisdom';
 import * as cdk from 'aws-cdk-lib/core';
 import * as cr from 'aws-cdk-lib/custom-resources';
 import { Construct } from 'constructs';
+import { CONTACT_FLOW, CUSTOMER_QUEUE } from './flow';
 import { ESCALATION_GUIDE_FLOW_NAME, escalationGuideFlow } from './flows/escalation-guide-flow';
 import {
   AFTER_HOURS_CASE_CHAT_TEXT,
@@ -892,7 +893,7 @@ export class ConnectStack extends cdk.Stack {
     const queueFlow = new connect.CfnContactFlow(this, 'QueueFlow', {
       instanceArn,
       name: QUEUE_FLOW_NAME,
-      type: 'CUSTOMER_QUEUE',
+      type: CUSTOMER_QUEUE,
       content: cdk.Fn.toJsonString(customerQueueFlow({
         dataTableId,
         holdMusicPromptArn: cdk.Fn.join('', [instanceArn, '/prompt/', CUSTOMER_QUEUE_PROMPT_ID]),
@@ -910,7 +911,7 @@ export class ConnectStack extends cdk.Stack {
     const escalationGuide = new connect.CfnContactFlow(this, 'EscalationGuide', {
       instanceArn,
       name: ESCALATION_GUIDE_FLOW_NAME,
-      type: 'CONTACT_FLOW',
+      type: CONTACT_FLOW,
       content: cdk.Fn.toJsonString(escalationGuideFlow({
         detailViewArn: cdk.Fn.join('', [
           'arn:',
@@ -925,7 +926,7 @@ export class ConnectStack extends cdk.Stack {
     const flow = new connect.CfnContactFlow(this, 'MainFlow', {
       instanceArn,
       name: MAIN_FLOW_NAME,
-      type: 'CONTACT_FLOW',
+      type: CONTACT_FLOW,
       content: cdk.Fn.toJsonString(mainFlow({
         dataTableId,
         wisdomAssistantArn: assistantArn,

@@ -4,6 +4,7 @@ import { flowPages } from '../lib/flow/pages';
 import {
   checkHoursOfOperation,
   compare,
+  CONTACT_FLOW,
   disconnectParticipant,
   equals,
   exists,
@@ -16,6 +17,7 @@ import {
 test('toMermaid labels actions and branches in flow order', () => {
   const compiled = flow({
     name: 'Test',
+    type: CONTACT_FLOW,
     start: 'hours',
     actions: [
       checkHoursOfOperation('hours', { HoursOfOperationId: 'h' }, {

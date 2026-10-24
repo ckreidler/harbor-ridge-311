@@ -1,4 +1,5 @@
 import {
+  CUSTOMER_QUEUE,
   compare,
   equals,
   evaluateDataTableValues,
@@ -6,7 +7,6 @@ import {
   messageParticipant,
   messageParticipantIteratively,
   wait,
-  type CustomerQueueAction,
   type DataTableQuery,
   type FlowContent,
 } from '../flow';
@@ -34,35 +34,39 @@ function promptQuery(queryName: string): DataTableQuery {
 }
 
 export function customerQueueFlow(props: CustomerQueueFlowProps): FlowContent {
-  const actions: readonly CustomerQueueAction[] = [
-    compare('branch-channel', {
-      ComparisonValue: '$.Channel',
-    }, {
-      next: 'lookup-queue-voice',
-      conditions: [equals('CHAT', 'lookup-queue-chat')],
-      noMatch: 'lookup-queue-voice',
-    }),
-    evaluateDataTableValues('lookup-queue-chat', {
-      DataTableId: props.dataTableId,
-      Queries: [promptQuery('QueueChat')],
-    }, { next: 'play-queue-chat', error: 'play-queue-fallback' }),
-    messageParticipant('play-queue-chat', {
-      Text: '$.DataTables.QueueChat.Text',
-    }, { next: 'wait-in-queue', error: 'play-queue-fallback' }),
-    messageParticipant('play-queue-fallback', {
-      Text: QUEUE_CHAT_TEXT,
-    }, { next: 'wait-in-queue', error: 'wait-in-queue' }),
-    wait('wait-in-queue', {
-      TimeLimitSeconds: CHAT_WAIT_SECONDS,
-    }, { next: 'wait-in-queue', completed: 'wait-in-queue', error: 'wait-in-queue' }),
-    evaluateDataTableValues('lookup-queue-voice', {
-      DataTableId: props.dataTableId,
-      Queries: [promptQuery('QueueVoice')],
-    }, { next: 'loop-hold', error: 'loop-hold-fallback' }),
-    messageParticipantIteratively('loop-hold', {
-      Messages: [
-        { Text: '$.DataTables.QueueVoice.Text' },
-        { PromptId: props.holdMusicPromptArn },
+  return flow({
+    name: QUEUE_FLOW_NAME,
+    type: CUSTOMER_QUEUE,
+    start: 'branch-channel',
+    actions: [
+      compare('branch-channel', {
+        ComparisonValue: '$.Channel',
+      }, {
+        next: 'lookup-queue-voice',
+        conditions: [equals('CHAT', 'lookup-queue-chat')],
+        noMatch: 'lookup-queue-voice',
+      }),
+      evaluateDataTableValues('lookup-queue-chat', {
+        DataTableId: props.dataTableId,
+        Queries: [promptQuery('QueueChat')],
+      }, { next: 'play-queue-chat', error: 'play-queue-fallback' }),
+      messageParticipant('play-queue-chat', {
+        Text: '$.DataTables.QueueChat.Text',
+      }, { next: 'wait-in-queue', error: 'play-queue-fallback' }),
+      messageParticipant('play-queue-fallback', {
+        Text: QUEUE_CHAT_TEXT,
+      }, { next: 'wait-in-queue', error: 'wait-in-queue' }),
+      wait('wait-in-queue', {
+        TimeLimitSeconds: CHAT_WAIT_SECONDS,
+      }, { next: 'wait-in-queue', completed: 'wait-in-queue', error: 'wait-in-queue' }),
+      evaluateDataTableValues('lookup-queue-voice', {
+        DataTableId: props.dataTableId,
+        Queries: [promptQuery('QueueVoice')],
+      }, { next: 'loop-hold', error: 'loop-hold-fallback' }),
+      messageParticipantIteratively('loop-hold', {
+        Messages: [
+          { Text: '$.DataTables.QueueVoice.Text' },
+          { PromptId: props.holdMusicPromptArn },
       ],
     }, { next: 'loop-hold' }),
     messageParticipantIteratively('loop-hold-fallback', {
@@ -71,10 +75,6 @@ export function customerQueueFlow(props: CustomerQueueFlowProps): FlowContent {
         { PromptId: props.holdMusicPromptArn },
       ],
     }, { next: 'loop-hold-fallback' }),
-  ];
-  return flow({
-    name: QUEUE_FLOW_NAME,
-    start: 'branch-channel',
-    actions,
+    ],
   });
 }

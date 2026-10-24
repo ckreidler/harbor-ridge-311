@@ -1,10 +1,21 @@
 import { Token } from 'aws-cdk-lib/core';
-import type { ActionType, FlowAction, Json } from './actions';
+import type { ActionType, CustomerQueueAction, FlowAction, InboundContactAction, Json } from './actions';
 
-export interface FlowDefinition {
+export const CONTACT_FLOW = 'CONTACT_FLOW' as const;
+export const CUSTOMER_QUEUE = 'CUSTOMER_QUEUE' as const;
+
+export type ConnectFlowType = typeof CONTACT_FLOW | typeof CUSTOMER_QUEUE;
+
+export type ActionsForFlowType = {
+  CONTACT_FLOW: InboundContactAction;
+  CUSTOMER_QUEUE: CustomerQueueAction;
+};
+
+export interface FlowDefinition<T extends ConnectFlowType> {
   readonly name: string;
+  readonly type: T;
   readonly start: string;
-  readonly actions: readonly FlowAction[];
+  readonly actions: readonly ActionsForFlowType[T][];
 }
 
 export interface FlowTransitions {
@@ -64,7 +75,10 @@ function targets(action: FlowAction): string[] {
   ];
 }
 
-function problems(definition: FlowDefinition): string[] {
+function problems(definition: {
+  readonly start: string;
+  readonly actions: readonly FlowAction[];
+}): string[] {
   const found: string[] = [];
   const byKey = new Map<string, FlowAction>();
   for (const action of definition.actions) {
@@ -132,7 +146,7 @@ function transitions(action: FlowAction): FlowTransitions {
   };
 }
 
-export function flow(definition: FlowDefinition): FlowContent {
+export function flow<T extends ConnectFlowType>(definition: FlowDefinition<T>): FlowContent {
   if (Token.isUnresolved(definition.name)) {
     throw new Error('flow name must be a literal string, not a token');
   }
