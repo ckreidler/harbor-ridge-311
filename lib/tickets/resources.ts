@@ -301,9 +301,6 @@ export function addTickets(stack: cdk.Stack, instanceArn: string, instanceId: st
     description: 'Harbor Ridge 311 ticket API',
     credentialProviderConfigurations: [{
       credentialProviderType: 'GATEWAY_IAM_ROLE',
-      credentialProvider: {
-        iamCredentialProvider: { service: 'execute-api' },
-      },
     }],
     targetConfiguration: {
       mcp: {

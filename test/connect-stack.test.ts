@@ -913,9 +913,14 @@ test('ConnectStack stores customer-scoped tickets behind an IAM API and a JWT ga
     Name: 'Tickets',
     CredentialProviderConfigurations: [{
       CredentialProviderType: 'GATEWAY_IAM_ROLE',
-      CredentialProvider: { IamCredentialProvider: { Service: 'execute-api' } },
     }],
   });
+  const ticketTarget = Object.values(template.findResources('AWS::BedrockAgentCore::GatewayTarget'))[0] as {
+    Properties: { CredentialProviderConfigurations: Array<Record<string, unknown>> };
+  };
+  expect(ticketTarget.Properties.CredentialProviderConfigurations).toEqual([
+    { CredentialProviderType: 'GATEWAY_IAM_ROLE' },
+  ]);
   template.hasResourceProperties('AWS::AppIntegrations::Application', {
     Name: 'HarborRidge311Tickets',
     ApplicationType: 'MCP_SERVER',
