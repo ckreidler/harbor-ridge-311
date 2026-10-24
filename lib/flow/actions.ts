@@ -1,5 +1,3 @@
-export type ActionKey = string;
-
 export type Json = string | number | boolean | null | readonly Json[] | { readonly [key: string]: Json };
 
 export type ActionType =
@@ -24,26 +22,34 @@ export type ActionType =
 export interface ConditionBranch {
   readonly operator: 'Equals' | 'Exists';
   readonly operands: readonly string[];
-  readonly to: ActionKey;
+  readonly to: string;
 }
 
 export interface ErrorBranch {
   readonly error: string;
-  readonly to: ActionKey;
+  readonly to: string;
 }
 
-export interface FlowAction {
-  readonly key: ActionKey;
-  readonly type: ActionType;
+export interface ContinuingAction {
+  readonly key: string;
+  readonly type: Exclude<ActionType, 'DisconnectParticipant'>;
   readonly parameters: { readonly [name: string]: Json };
-  readonly next?: ActionKey;
+  readonly next: string;
   readonly conditions: readonly ConditionBranch[];
   readonly errors: readonly ErrorBranch[];
 }
 
+export interface TerminalAction {
+  readonly key: string;
+  readonly type: 'DisconnectParticipant';
+  readonly parameters: { readonly [name: string]: Json };
+}
+
+export type FlowAction = ContinuingAction | TerminalAction;
+
 export interface Branches {
-  readonly next: ActionKey;
-  readonly error: ActionKey;
+  readonly next: string;
+  readonly error: string;
 }
 
 export type DataTableQuery = {
@@ -56,37 +62,37 @@ export type EventHooks =
   | { readonly DefaultAgentUI: string }
   | { readonly CustomerQueue: string };
 
-export function equals(operand: string, to: ActionKey): ConditionBranch {
+export function equals(operand: string, to: string): ConditionBranch {
   return { operator: 'Equals', operands: [operand], to };
 }
 
-export function exists(to: ActionKey): ConditionBranch {
+export function exists(to: string): ConditionBranch {
   return { operator: 'Exists', operands: [], to };
 }
 
-function onError(to: ActionKey): ErrorBranch[] {
+function onError(to: string): ErrorBranch[] {
   return [{ error: 'NoMatchingError', to }];
 }
 
 function simple(
-  key: ActionKey,
-  type: ActionType,
-  parameters: FlowAction['parameters'],
+  key: string,
+  type: Exclude<ActionType, 'DisconnectParticipant'>,
+  parameters: ContinuingAction['parameters'],
   { next, error }: Branches,
-): FlowAction {
+): ContinuingAction {
   return { key, type, parameters, next, conditions: [], errors: onError(error) };
 }
 
 export function updateFlowLoggingBehavior(
-  key: ActionKey,
+  key: string,
   parameters: { readonly FlowLoggingBehavior: 'Enabled' | 'Disabled' },
-  { next }: { readonly next: ActionKey },
+  { next }: { readonly next: string },
 ): FlowAction {
   return { key, type: 'UpdateFlowLoggingBehavior', parameters, next, conditions: [], errors: [] };
 }
 
 export function updateContactTextToSpeechVoice(
-  key: ActionKey,
+  key: string,
   parameters: {
     readonly TextToSpeechVoice: string;
     readonly TextToSpeechEngine: 'Standard' | 'Neural' | 'Generative';
@@ -97,7 +103,7 @@ export function updateContactTextToSpeechVoice(
 }
 
 export function evaluateDataTableValues(
-  key: ActionKey,
+  key: string,
   parameters: { readonly DataTableId: string; readonly Queries: readonly DataTableQuery[] },
   branches: Branches,
 ): FlowAction {
@@ -105,7 +111,7 @@ export function evaluateDataTableValues(
 }
 
 export function messageParticipant(
-  key: ActionKey,
+  key: string,
   parameters: { readonly Text: string } | { readonly SSML: string },
   branches: Branches,
 ): FlowAction {
@@ -113,7 +119,7 @@ export function messageParticipant(
 }
 
 export function createWisdomSession(
-  key: ActionKey,
+  key: string,
   parameters: { readonly WisdomAssistantArn: string },
   branches: Branches,
 ): FlowAction {
@@ -121,7 +127,7 @@ export function createWisdomSession(
 }
 
 export function invokeLambdaFunction(
-  key: ActionKey,
+  key: string,
   parameters: {
     readonly LambdaFunctionARN: string;
     readonly InvocationTimeLimitSeconds: string;
@@ -133,17 +139,17 @@ export function invokeLambdaFunction(
 }
 
 export function connectParticipantWithLexBot(
-  key: ActionKey,
+  key: string,
   parameters: {
     readonly Text: string;
     readonly LexV2Bot: { readonly AliasArn: string };
     readonly LexSessionAttributes?: { readonly [name: string]: string };
   },
   { next, timeout, noMatch, error }: {
-    readonly next: ActionKey;
-    readonly timeout: ActionKey;
-    readonly noMatch: ActionKey;
-    readonly error: ActionKey;
+    readonly next: string;
+    readonly timeout: string;
+    readonly noMatch: string;
+    readonly error: string;
   },
 ): FlowAction {
   return {
@@ -161,12 +167,12 @@ export function connectParticipantWithLexBot(
 }
 
 export function compare(
-  key: ActionKey,
+  key: string,
   parameters: { readonly ComparisonValue: string },
   { next, conditions, noMatch }: {
-    readonly next: ActionKey;
+    readonly next: string;
     readonly conditions: readonly [ConditionBranch, ...ConditionBranch[]];
-    readonly noMatch: ActionKey;
+    readonly noMatch: string;
   },
 ): FlowAction {
   return {
@@ -180,7 +186,7 @@ export function compare(
 }
 
 export function updateContactAttributes(
-  key: ActionKey,
+  key: string,
   parameters: {
     readonly Attributes: { readonly [name: string]: string };
     readonly TargetContact: 'Current' | 'Related';
@@ -191,13 +197,13 @@ export function updateContactAttributes(
 }
 
 export function checkHoursOfOperation(
-  key: ActionKey,
+  key: string,
   parameters: { readonly HoursOfOperationId: string },
   { next, inHours, outOfHours, error }: {
-    readonly next: ActionKey;
-    readonly inHours: ActionKey;
-    readonly outOfHours: ActionKey;
-    readonly error: ActionKey;
+    readonly next: string;
+    readonly inHours: string;
+    readonly outOfHours: string;
+    readonly error: string;
   },
 ): FlowAction {
   return {
@@ -211,7 +217,7 @@ export function checkHoursOfOperation(
 }
 
 export function updateContactEventHooks(
-  key: ActionKey,
+  key: string,
   parameters: { readonly EventHooks: EventHooks },
   branches: Branches,
 ): FlowAction {
@@ -219,7 +225,7 @@ export function updateContactEventHooks(
 }
 
 export function updateContactTargetQueue(
-  key: ActionKey,
+  key: string,
   parameters: { readonly QueueId: string },
   branches: Branches,
 ): FlowAction {
@@ -227,11 +233,11 @@ export function updateContactTargetQueue(
 }
 
 export function transferContactToQueue(
-  key: ActionKey,
+  key: string,
   { next, atCapacity, error }: {
-    readonly next: ActionKey;
-    readonly atCapacity: ActionKey;
-    readonly error: ActionKey;
+    readonly next: string;
+    readonly atCapacity: string;
+    readonly error: string;
   },
 ): FlowAction {
   return {
@@ -248,16 +254,16 @@ export function transferContactToQueue(
 }
 
 export function createCase(
-  key: ActionKey,
+  key: string,
   parameters: {
     readonly LinkContactToCase: 'true' | 'false';
     readonly CaseTemplateId: string;
     readonly CaseRequestFields: { readonly [fieldId: string]: string };
   },
   { next, notLinked, error }: {
-    readonly next: ActionKey;
-    readonly notLinked: ActionKey;
-    readonly error: ActionKey;
+    readonly next: string;
+    readonly notLinked: string;
+    readonly error: string;
   },
 ): FlowAction {
   return {
@@ -274,7 +280,7 @@ export function createCase(
 }
 
 export function getCase(
-  key: ActionKey,
+  key: string,
   parameters: {
     readonly LinkContactToCase: 'true' | 'false';
     readonly GetLastUpdatedCase: 'true' | 'false';
@@ -282,10 +288,10 @@ export function getCase(
     readonly CaseResponseFields: readonly string[];
   },
   { next, error, noneFound, multipleFound }: {
-    readonly next: ActionKey;
-    readonly error: ActionKey;
-    readonly noneFound: ActionKey;
-    readonly multipleFound: ActionKey;
+    readonly next: string;
+    readonly error: string;
+    readonly noneFound: string;
+    readonly multipleFound: string;
   },
 ): FlowAction {
   return {
@@ -303,12 +309,12 @@ export function getCase(
 }
 
 export function wait(
-  key: ActionKey,
+  key: string,
   parameters: { readonly TimeLimitSeconds: string },
   { next, completed, error }: {
-    readonly next: ActionKey;
-    readonly completed: ActionKey;
-    readonly error: ActionKey;
+    readonly next: string;
+    readonly completed: string;
+    readonly error: string;
   },
 ): FlowAction {
   return {
@@ -321,6 +327,6 @@ export function wait(
   };
 }
 
-export function disconnectParticipant(key: ActionKey): FlowAction {
-  return { key, type: 'DisconnectParticipant', parameters: {}, conditions: [], errors: [] };
+export function disconnectParticipant(key: string): TerminalAction {
+  return { key, type: 'DisconnectParticipant', parameters: {} };
 }

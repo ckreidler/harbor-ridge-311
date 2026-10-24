@@ -1,10 +1,9 @@
-import { createHash } from 'node:crypto';
 import { Token } from 'aws-cdk-lib/core';
-import type { ActionKey, ActionType, FlowAction, Json } from './actions';
+import type { ActionType, FlowAction, Json } from './actions';
 
 export interface FlowDefinition {
   readonly name: string;
-  readonly start: ActionKey;
+  readonly start: string;
   readonly actions: readonly FlowAction[];
 }
 
@@ -27,19 +26,39 @@ export interface FlowContent {
   Actions: FlowContentAction[];
 }
 
-const IDENTIFIER_NAMESPACE = Buffer.from('9864b7d53cac4cfb8346d09fd3f00f49', 'hex');
+const IDENTIFIER_LIMIT = 50;
+const REJECTED_IDENTIFIER_CHARACTERS = /[%:()\\/=$,;\[\]{}]/;
+const REJECTED_IDENTIFIERS = new Set([
+  '__proto__',
+  'constructor',
+  '__defineGetter__',
+  '__defineSetter__',
+  'toString',
+  'hasOwnProperty',
+  'isPrototypeOf',
+  'propertyIsEnumerable',
+  'toLocaleString',
+  'valueOf',
+]);
 
-export function actionId(flowName: string, key: ActionKey): string {
-  const hash = createHash('sha1').update(IDENTIFIER_NAMESPACE).update(JSON.stringify([flowName, key])).digest();
-  hash[6] = (hash[6] & 0x0f) | 0x50;
-  hash[8] = (hash[8] & 0x3f) | 0x80;
-  const hex = hash.subarray(0, 16).toString('hex');
-  return [hex.slice(0, 8), hex.slice(8, 12), hex.slice(12, 16), hex.slice(16, 20), hex.slice(20)].join('-');
+function invalidIdentifier(key: string): string | undefined {
+  if (
+    key.length < 1
+    || key.length > IDENTIFIER_LIMIT
+    || REJECTED_IDENTIFIER_CHARACTERS.test(key)
+    || REJECTED_IDENTIFIERS.has(key)
+  ) {
+    return `action key "${key}" is not a valid Identifier`;
+  }
+  return undefined;
 }
 
-function targets(action: FlowAction): ActionKey[] {
+function targets(action: FlowAction): string[] {
+  if (action.type === 'DisconnectParticipant') {
+    return [];
+  }
   return [
-    ...(action.next === undefined ? [] : [action.next]),
+    action.next,
     ...action.conditions.map((branch) => branch.to),
     ...action.errors.map((branch) => branch.to),
   ];
@@ -47,10 +66,15 @@ function targets(action: FlowAction): ActionKey[] {
 
 function problems(definition: FlowDefinition): string[] {
   const found: string[] = [];
-  const byKey = new Map<ActionKey, FlowAction>();
+  const byKey = new Map<string, FlowAction>();
   for (const action of definition.actions) {
     if (Token.isUnresolved(action.key)) {
       found.push(`action key ${action.key} is a token`);
+    } else {
+      const invalid = invalidIdentifier(action.key);
+      if (invalid !== undefined) {
+        found.push(invalid);
+      }
     }
     if (byKey.has(action.key)) {
       found.push(`duplicate action key "${action.key}"`);
@@ -68,7 +92,7 @@ function problems(definition: FlowDefinition): string[] {
     found.push(`start action "${definition.start}" is not defined`);
     return found;
   }
-  const reached = new Set<ActionKey>();
+  const reached = new Set<string>();
   const pending = [definition.start];
   for (let key = pending.pop(); key !== undefined; key = pending.pop()) {
     const action = byKey.get(key);
@@ -86,20 +110,22 @@ function problems(definition: FlowDefinition): string[] {
   return found;
 }
 
-function transitions(action: FlowAction, id: (key: ActionKey) => string): FlowTransitions {
-  if (action.next === undefined) {
+function transitions(action: FlowAction): FlowTransitions {
+  if (action.type === 'DisconnectParticipant') {
     return {};
   }
-  const NextAction = id(action.next);
+  const NextAction = action.next;
   if (action.conditions.length === 0 && action.errors.length === 0) {
     return { NextAction };
   }
-  const Conditions = action.conditions.map((branch) => ({
-    NextAction: id(branch.to),
-    Condition: { Operator: branch.operator, Operands: [...branch.operands] },
-  }));
-  const Errors = action.errors.map((branch) => ({ ErrorType: branch.error, NextAction: id(branch.to) }));
-  return Conditions.length > 0 ? { NextAction, Conditions, Errors } : { NextAction, Errors, Conditions };
+  return {
+    NextAction,
+    Conditions: action.conditions.map((branch) => ({
+      NextAction: branch.to,
+      Condition: { Operator: branch.operator, Operands: [...branch.operands] },
+    })),
+    Errors: action.errors.map((branch) => ({ ErrorType: branch.error, NextAction: branch.to })),
+  };
 }
 
 export function flow(definition: FlowDefinition): FlowContent {
@@ -110,15 +136,14 @@ export function flow(definition: FlowDefinition): FlowContent {
   if (found.length > 0) {
     throw new Error(`invalid flow ${definition.name}:\n${found.map((problem) => `  - ${problem}`).join('\n')}`);
   }
-  const id = (key: ActionKey) => actionId(definition.name, key);
   return {
     Version: '2019-10-30',
-    StartAction: id(definition.start),
+    StartAction: definition.start,
     Actions: definition.actions.map((action) => ({
-      Identifier: id(action.key),
+      Identifier: action.key,
       Type: action.type,
       Parameters: action.parameters,
-      Transitions: transitions(action, id),
+      Transitions: transitions(action),
     })),
   };
 }

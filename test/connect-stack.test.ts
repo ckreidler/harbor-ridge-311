@@ -3,7 +3,6 @@ import * as path from 'node:path';
 import { Template } from 'aws-cdk-lib/assertions';
 import * as cdk from 'aws-cdk-lib/core';
 import { ConnectStack, CUSTOMER_QUEUE_PROMPT_ID, REQUEST_CATEGORY_FIELD_ID } from '../lib/connect-stack';
-import { relabelMainFlow } from './relabel-main-flow';
 import {
   AFTER_HOURS_CASE_CHAT_TEXT,
   AFTER_HOURS_CASE_TEXT_AFTER,
@@ -51,7 +50,7 @@ interface FlowContent {
 function mainDocument(content: unknown): FlowContent {
   const document = flowDocument(content);
   expect(document.Metadata).toBeUndefined();
-  return relabelMainFlow(document);
+  return document;
 }
 
 function flowDocument(content: unknown): FlowContent {

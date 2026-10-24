@@ -1,11 +1,6 @@
 import { escalationGuideFlow } from '../lib/flows/escalation-guide-flow';
-import { AFTER_HOURS_CLOSED_TEXT, mainFlow as buildMainFlow } from '../lib/flows/main-flow';
+import { AFTER_HOURS_CLOSED_TEXT, mainFlow } from '../lib/flows/main-flow';
 import { customerQueueFlow, QUEUE_CHAT_TEXT, QUEUE_VOICE_TEXT } from '../lib/flows/queue-flow';
-import { relabelMainFlow } from './relabel-main-flow';
-
-function mainFlow(props: Parameters<typeof buildMainFlow>[0]) {
-  return relabelMainFlow(buildMainFlow(props));
-}
 
 const allowedErrors: Record<string, readonly string[]> = {
   UpdateFlowLoggingBehavior: [],
