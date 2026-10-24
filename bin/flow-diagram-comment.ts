@@ -2,17 +2,12 @@ import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { toMermaid } from '../lib/flow/mermaid';
+import { flowPages } from '../lib/flow/pages';
 
 export const FLOW_DIAGRAM_MARKER = '<!-- harbor-ridge-flow-diagrams -->';
 
 const COMMENT_LIMIT = 65536;
-
-export interface FlowSnapshot {
-  readonly name: string;
-  readonly content: unknown;
-  readonly mermaid: string;
-}
 
 export interface ChangedFlow {
   readonly name: string;
@@ -23,10 +18,6 @@ export type CommentPlan =
   | { readonly action: 'skip' }
   | { readonly action: 'create'; readonly body: string }
   | { readonly action: 'update'; readonly id: number; readonly body: string };
-
-interface PagesModule {
-  flowPages?: () => Array<{ name: string; body: string; content?: unknown }>;
-}
 
 interface PullRequestEvent {
   number?: number;
@@ -56,48 +47,42 @@ export function stableStringify(value: unknown): string {
   return `{${keys.map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`).join(',')}}`;
 }
 
-export function mermaidFromDiagram(body: string, name = 'diagram page'): string {
-  const match = body.match(/```mermaid\n([\s\S]*?)\n```/);
-  if (!match?.[1]) throw new Error(`${name} is missing a mermaid block`);
-  return match[1];
-}
-
-export function snapshotsFromPages(
-  pages: ReadonlyArray<{ name: string; body: string; content?: unknown }>,
-): FlowSnapshot[] {
-  return pages.map((page) => {
-    if (page.content === undefined || page.content === null) {
-      throw new Error(`${page.name} is missing compiled content`);
-    }
-    return {
-      name: page.name,
-      content: page.content,
-      mermaid: mermaidFromDiagram(page.body, page.name),
-    };
-  });
-}
-
-function compiled(flow: FlowSnapshot): unknown {
-  if (flow.content === null || flow.content === undefined) {
-    throw new Error(`${flow.name} is missing compiled content`);
+export function contactFlowContents(template: unknown): Map<string, unknown> {
+  if (typeof template !== 'object' || template === null) throw new Error('ConnectStack template is not an object');
+  const resources = (template as { Resources?: unknown }).Resources;
+  if (typeof resources !== 'object' || resources === null) throw new Error('ConnectStack template has no Resources');
+  const flows = new Map<string, unknown>();
+  for (const [logicalId, value] of Object.entries(resources)) {
+    if (typeof value !== 'object' || value === null) continue;
+    const resource = value as { Type?: unknown; Properties?: { Name?: unknown; Content?: unknown } };
+    if (resource.Type !== 'AWS::Connect::ContactFlow') continue;
+    const name = resource.Properties?.Name;
+    if (typeof name !== 'string') throw new Error(`ContactFlow ${logicalId} Name is not a string`);
+    if (flows.has(name)) throw new Error(`duplicate ContactFlow name ${name}`);
+    flows.set(name, resource.Properties?.Content);
   }
-  return flow.content;
+  return flows;
 }
 
-function differs(left: FlowSnapshot, right: FlowSnapshot): boolean {
-  return stableStringify(compiled(left)) !== stableStringify(compiled(right));
+export function headDiagrams(): Map<string, string> {
+  return new Map(flowPages().map((page) => [page.name, toMermaid(page.content)]));
 }
 
-export function changedFlows(base: readonly FlowSnapshot[], head: readonly FlowSnapshot[]): ChangedFlow[] {
-  const baseByName = new Map(base.map((flow) => [flow.name, flow]));
-  const headNames = new Set(head.map((flow) => flow.name));
+export function changedFlows(
+  base: ReadonlyMap<string, unknown>,
+  head: ReadonlyMap<string, unknown>,
+  diagrams: ReadonlyMap<string, string>,
+): ChangedFlow[] {
   const changed: ChangedFlow[] = [];
-  for (const flow of head) {
-    const previous = baseByName.get(flow.name);
-    if (!previous || differs(previous, flow)) changed.push({ name: flow.name, mermaid: flow.mermaid });
+  for (const [name, content] of head) {
+    if (!base.has(name) || stableStringify(base.get(name)) !== stableStringify(content)) {
+      const mermaid = diagrams.get(name);
+      if (mermaid === undefined) throw new Error(`no diagram for ${name}`);
+      changed.push({ name, mermaid });
+    }
   }
-  for (const flow of base) {
-    if (!headNames.has(flow.name)) changed.push({ name: flow.name });
+  for (const name of base.keys()) {
+    if (!head.has(name)) changed.push({ name });
   }
   return changed;
 }
@@ -137,47 +122,58 @@ export function commentPlan(changed: readonly ChangedFlow[], existingId: number 
   return { action: 'update', id: existingId, body };
 }
 
-export async function loadFlowSnapshots(root: string): Promise<FlowSnapshot[]> {
-  const file = path.join(root, 'lib/flow/pages.ts');
-  if (!fs.existsSync(file)) throw new Error(`missing ${file}`);
-  const loaded = await import(pathToFileURL(file).href) as PagesModule;
-  if (typeof loaded.flowPages !== 'function') throw new Error(`${file} does not export flowPages`);
-  try {
-    return snapshotsFromPages(loaded.flowPages());
-  } catch (error) {
-    if (error instanceof Error) throw new Error(`${error.message} (${file})`);
-    throw error;
-  }
-}
-
 function revision(value: string): string {
   if (!/^[A-Za-z0-9][A-Za-z0-9._/^~-]*$/.test(value)) throw new Error(`invalid revision ${value}`);
   return git(['rev-parse', '--verify', `${value}^{commit}`]);
 }
 
-function unlinkModules(root: string): void {
-  const modules = path.join(root, 'node_modules');
+function unlinkIfSymlink(file: string): void {
   try {
-    if (fs.lstatSync(modules).isSymbolicLink()) fs.unlinkSync(modules);
+    if (fs.lstatSync(file).isSymbolicLink()) fs.unlinkSync(file);
   } catch {
     return;
   }
 }
 
-function ensureDependencies(root: string): void {
-  const modules = path.join(root, 'node_modules');
+function sameLockfile(root: string, relativeLock: string): boolean {
+  const lock = path.join(root, relativeLock);
+  const localLock = path.join(repoRoot(), relativeLock);
+  return fs.existsSync(lock) && fs.existsSync(localLock) && fs.readFileSync(lock).equals(fs.readFileSync(localLock));
+}
+
+function ensureInstalled(root: string, relativeModules: string, relativeLock: string, install: () => void): void {
+  const modules = path.join(root, relativeModules);
   if (fs.existsSync(modules)) return;
-  const lock = path.join(root, 'package-lock.json');
-  const localLock = path.join(repoRoot(), 'package-lock.json');
-  if (fs.existsSync(lock) && fs.existsSync(localLock) && fs.readFileSync(lock).equals(fs.readFileSync(localLock))) {
-    fs.symlinkSync(path.join(repoRoot(), 'node_modules'), modules);
+  if (sameLockfile(root, relativeLock)) {
+    fs.symlinkSync(path.join(repoRoot(), relativeModules), modules);
     return;
   }
-  execFileSync('npm', ['ci', '--ignore-scripts'], { cwd: root, stdio: 'inherit' });
+  install();
+}
+
+function ensureDependencies(root: string): void {
+  ensureInstalled(root, 'node_modules', 'package-lock.json', () => {
+    execFileSync('npm', ['ci', '--ignore-scripts'], { cwd: root, stdio: 'inherit' });
+  });
+  if (!fs.existsSync(path.join(root, 'website', 'package.json'))) return;
+  ensureInstalled(root, path.join('website', 'node_modules'), path.join('website', 'package-lock.json'), () => {
+    execFileSync('npm', ['ci', '--ignore-scripts', '--prefix', 'website'], { cwd: root, stdio: 'inherit' });
+  });
+}
+
+function synthesize(root: string): Map<string, unknown> {
+  execFileSync('npx', ['cdk', 'synth'], {
+    cwd: root,
+    stdio: 'inherit',
+    env: { ...process.env, AWS_EC2_METADATA_DISABLED: 'true' },
+  });
+  const file = path.join(root, 'cdk.out', 'ConnectStack.template.json');
+  return contactFlowContents(JSON.parse(fs.readFileSync(file, 'utf8')) as unknown);
 }
 
 function clearWorktree(worktree: string): void {
-  unlinkModules(worktree);
+  unlinkIfSymlink(path.join(worktree, 'node_modules'));
+  unlinkIfSymlink(path.join(worktree, 'website', 'node_modules'));
   try {
     execFileSync('git', ['worktree', 'remove', '--force', worktree], { cwd: repoRoot(), stdio: 'ignore' });
   } catch {
@@ -186,9 +182,9 @@ function clearWorktree(worktree: string): void {
   execFileSync('git', ['worktree', 'prune'], { cwd: repoRoot(), stdio: 'ignore' });
 }
 
-async function snapshotsAt(sha: string): Promise<FlowSnapshot[]> {
+function flowsAt(sha: string): Map<string, unknown> {
   const resolved = revision(sha);
-  if (resolved === revision('HEAD')) return loadFlowSnapshots(repoRoot());
+  if (resolved === revision('HEAD')) return synthesize(repoRoot());
   const worktree = path.join(os.tmpdir(), `flow-diagrams-${resolved}`);
   clearWorktree(worktree);
   execFileSync('git', ['worktree', 'add', '--detach', worktree, resolved], {
@@ -197,7 +193,7 @@ async function snapshotsAt(sha: string): Promise<FlowSnapshot[]> {
   });
   try {
     ensureDependencies(worktree);
-    return await loadFlowSnapshots(worktree);
+    return synthesize(worktree);
   } finally {
     clearWorktree(worktree);
   }
@@ -283,9 +279,9 @@ async function main(): Promise<void> {
   const baseSha = option('--base') ?? pullRequest?.base?.sha;
   const headSha = option('--head') ?? pullRequest?.head?.sha;
   if (!baseSha || !headSha) throw new Error('missing base or head sha');
-  const base = await snapshotsAt(baseSha);
-  const head = await snapshotsAt(headSha);
-  const changed = changedFlows(base, head);
+  const base = flowsAt(baseSha);
+  const head = flowsAt(headSha);
+  const changed = changedFlows(base, head, headDiagrams());
   const token = process.env.GITHUB_TOKEN;
   let existingId: number | undefined;
   let repo: string | undefined;
@@ -299,7 +295,7 @@ async function main(): Promise<void> {
     existingId = commentId(await listComments(token, repo, pr), FLOW_DIAGRAM_MARKER);
   }
   const plan = commentPlan(changed, existingId);
-  console.error(`flow diagrams: ${base.length} base, ${head.length} head, ${changed.length} changed, ${plan.action}`);
+  console.error(`flow diagrams: ${base.size} base, ${head.size} head, ${changed.length} changed, ${plan.action}`);
   if (plan.action === 'skip') return;
   console.log(plan.body);
   if (!token || repo === undefined || pr === undefined) return;

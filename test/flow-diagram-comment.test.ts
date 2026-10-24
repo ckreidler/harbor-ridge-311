@@ -1,4 +1,3 @@
-import type { FlowContent } from '../lib/flow';
 import { toMermaid } from '../lib/flow';
 import { flowPages } from '../lib/flow/pages';
 import {
@@ -6,54 +5,75 @@ import {
   changedFlows,
   commentId,
   commentPlan,
+  contactFlowContents,
   diagramComment,
-  mermaidFromDiagram,
-  snapshotsFromPages,
+  headDiagrams,
   stableStringify,
-  type FlowSnapshot,
 } from '../bin/flow-diagram-comment';
 
-function pages(): FlowSnapshot[] {
-  return snapshotsFromPages(flowPages());
+function flows(entries: ReadonlyArray<[string, unknown]>): Map<string, unknown> {
+  return new Map(entries);
 }
 
-test('flowPages diagrams come from compiled content', () => {
-  const compiled = flowPages();
-  const snapshots = pages();
-  expect(snapshots.map((flow) => flow.name)).toEqual(compiled.map((flow) => flow.name));
-  for (const flow of compiled) {
-    expect(flow.content.Version).toBe('2019-10-30');
-    expect(mermaidFromDiagram(flow.body, flow.name)).toBe(toMermaid(flow.content));
-  }
-  expect(changedFlows(snapshots, snapshots)).toEqual([]);
+test('contact flows are keyed by Name and keep Content as synthesized', () => {
+  const content = { 'Fn::Join': ['', ['{"Text":"wait"', { Ref: 'PromptsByChannel' }, '}'] ] };
+  const parsed = contactFlowContents({
+    Resources: {
+      SiteBucket: { Type: 'AWS::S3::Bucket', Properties: { BucketName: 'site' } },
+      QueueFlow: {
+        Type: 'AWS::Connect::ContactFlow',
+        Properties: { Name: 'HarborRidge311-Queue', Content: content, Type: 'CUSTOMER_QUEUE' },
+      },
+    },
+  });
+  expect([...parsed.keys()]).toEqual(['HarborRidge311-Queue']);
+  expect(parsed.get('HarborRidge311-Queue')).toEqual(content);
+  expect(() => contactFlowContents({
+    Resources: {
+      One: { Type: 'AWS::Connect::ContactFlow', Properties: { Name: 'Same', Content: 'a' } },
+      Two: { Type: 'AWS::Connect::ContactFlow', Properties: { Name: 'Same', Content: 'b' } },
+    },
+  })).toThrow('duplicate ContactFlow name Same');
 });
 
-test('compiled content differences ignore key order and include parameter-only edits', () => {
-  const base = pages();
-  const reordered = JSON.parse(stableStringify(base[0].content)) as FlowContent;
-  expect(stableStringify({ b: 1, a: { d: true, c: null } })).toBe(stableStringify({ a: { c: null, d: true }, b: 1 }));
-  const same = base.map((flow, index) => index === 0 ? { ...flow, content: reordered, mermaid: 'flowchart TD' } : flow);
-  expect(changedFlows(base, same)).toEqual([]);
-
-  const edited = structuredClone(base[0].content) as FlowContent;
-  edited.Actions[0].Parameters = { ...edited.Actions[0].Parameters, CIProbe: 'changed' };
-  const head = base.map((flow, index) => index === 0 ? { ...flow, content: edited } : flow);
-  expect(changedFlows(base, head)).toEqual([{ name: base[0].name, mermaid: base[0].mermaid }]);
-});
-
-test('missing compiled content is an error', () => {
-  const head = pages();
-  const legacy = head.map(({ name, mermaid }) => ({ name, mermaid, content: null }));
-  expect(() => changedFlows(legacy, head)).toThrow(`${head[0].name} is missing compiled content`);
-  expect(() => snapshotsFromPages([{ name: 'HarborRidge311-Queue', body: '```mermaid\nflowchart TD\n```' }])).toThrow(
-    'HarborRidge311-Queue is missing compiled content',
-  );
+test('Content comparison ignores key order and detects parameter-only edits', () => {
+  expect(stableStringify({ b: 1, a: { 'Fn::Sub': '${Arn}' } })).toBe(stableStringify({ a: { 'Fn::Sub': '${Arn}' }, b: 1 }));
+  const diagrams = new Map([['HarborRidge311-Queue', 'flowchart TD']]);
+  const base = flows([
+    ['HarborRidge311-Queue', { b: 1, 'Fn::Join': ['', ['{"Text":"', { 'Fn::GetAtt': ['PromptsByChannel', 'Arn'] }]] }],
+  ]);
+  const reordered = flows([
+    ['HarborRidge311-Queue', { 'Fn::Join': ['', ['{"Text":"', { 'Fn::GetAtt': ['PromptsByChannel', 'Arn'] }]], b: 1 }],
+  ]);
+  expect(changedFlows(base, reordered, diagrams)).toEqual([]);
+  const edited = flows([
+    ['HarborRidge311-Queue', { 'Fn::Join': ['', ['{"Text":"changed"', { 'Fn::GetAtt': ['PromptsByChannel', 'Arn'] }]], b: 1 }],
+  ]);
+  expect(changedFlows(base, edited, diagrams)).toEqual([
+    { name: 'HarborRidge311-Queue', mermaid: 'flowchart TD' },
+  ]);
 });
 
 test('added and removed flows are included', () => {
-  const snapshots = pages();
-  expect(changedFlows(snapshots, snapshots.slice(1))).toEqual([{ name: snapshots[0].name }]);
-  expect(changedFlows(snapshots.slice(1), snapshots)).toEqual([{ name: snapshots[0].name, mermaid: snapshots[0].mermaid }]);
+  const diagrams = new Map([
+    ['HarborRidge311-Main', 'flowchart TD\n  n_a["a"]'],
+    ['HarborRidge311-Queue', 'flowchart TD\n  n_q["q"]'],
+  ]);
+  const base = flows([['HarborRidge311-Queue', 'queue'], ['HarborRidge311-Main', 'main']]);
+  const head = flows([['HarborRidge311-Main', 'main']]);
+  expect(changedFlows(base, head, diagrams)).toEqual([{ name: 'HarborRidge311-Queue' }]);
+  expect(changedFlows(head, base, diagrams)).toEqual([
+    { name: 'HarborRidge311-Queue', mermaid: 'flowchart TD\n  n_q["q"]' },
+  ]);
+  expect(() => changedFlows(head, flows([['Extra', { 'Fn::Sub': '${X}' }]]), diagrams)).toThrow('no diagram for Extra');
+});
+
+test('head diagrams come from flowPages', () => {
+  const diagrams = headDiagrams();
+  expect([...diagrams.keys()]).toEqual(flowPages().map((page) => page.name));
+  for (const page of flowPages()) {
+    expect(diagrams.get(page.name)).toBe(toMermaid(page.content));
+  }
 });
 
 test('the sticky comment is one mermaid block per changed flow', () => {
@@ -66,7 +86,6 @@ test('the sticky comment is one mermaid block per changed flow', () => {
   expect(body).toContain('### HarborRidge311-Main\n\n```mermaid\nflowchart TD\n  n_a["a"]\n```');
   expect(body).toContain('### Gone\n\nRemoved.');
   expect(diagramComment([])).toBe(`${FLOW_DIAGRAM_MARKER}\n\nNo compiled flow content changed.`);
-  expect(() => mermaidFromDiagram('# title\n', 'HarborRidge311-Main')).toThrow(/HarborRidge311-Main/);
 });
 
 test('an existing sticky comment is updated in place', () => {
