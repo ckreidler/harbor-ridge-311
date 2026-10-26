@@ -1,4 +1,11 @@
-import { QConnectClient, UpdateSessionCommand, type UpdateSessionCommandInput } from '@aws-sdk/client-qconnect';
+import {
+  QConnectClient,
+  SessionDataNamespace,
+  UpdateSessionCommand,
+  UpdateSessionDataCommand,
+  type UpdateSessionCommandInput,
+  type UpdateSessionDataCommandInput,
+} from '@aws-sdk/client-qconnect';
 
 export const SELF_SERVICE_USE_CASE = 'Connect.SelfService';
 
@@ -7,7 +14,7 @@ export type { UpdateSessionCommandInput };
 export interface SelectOrchestratorEvent {
   Details?: {
     ContactData?: { Channel?: string };
-    Parameters?: { sessionArn?: string };
+    Parameters?: { sessionArn?: string; customerId?: string };
   };
 }
 
@@ -15,6 +22,10 @@ export const selectOrchestratorRuntime = {
   async updateSession(input: UpdateSessionCommandInput): Promise<void> {
     const client = new QConnectClient({});
     await client.send(new UpdateSessionCommand(input));
+  },
+  async updateSessionData(input: UpdateSessionDataCommandInput): Promise<void> {
+    const client = new QConnectClient({});
+    await client.send(new UpdateSessionDataCommand(input));
   },
 };
 
@@ -51,5 +62,14 @@ export async function handler(event: SelectOrchestratorEvent): Promise<{ channel
       orchestratorUseCase: SELF_SERVICE_USE_CASE,
     }],
   });
+  const customerId = event.Details?.Parameters?.customerId;
+  if (customerId) {
+    await selectOrchestratorRuntime.updateSessionData({
+      assistantId,
+      sessionId: sessionArn,
+      namespace: SessionDataNamespace.Custom,
+      data: [{ key: 'customerId', value: { stringValue: customerId } }],
+    });
+  }
   return { channel };
 }

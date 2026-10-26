@@ -22,7 +22,10 @@
     "typescript": "~7.0.2"
   },
   "dependencies": {
+    "@aws-sdk/client-connect": "^3.1153.0",
+    "@aws-sdk/client-dynamodb": "^3.1153.0",
     "@aws-sdk/client-qconnect": "3.1153.0",
+    "@aws-sdk/lib-dynamodb": "^3.1153.0",
     "aws-cdk-lib": "^2.268.0",
     "constructs": "^10.5.0"
   }
