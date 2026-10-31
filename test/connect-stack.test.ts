@@ -1281,7 +1281,7 @@ test('ConnectStack seeds an outage row the main flow can read', () => {
     Description: 'One outage row. The flow plays message when active is true.',
     Status: 'PUBLISHED',
     TimeZone: 'America/Los_Angeles',
-    ValueLockLevel: 'PRIMARY_VALUE',
+    ValueLockLevel: 'NONE',
     Tags: [{ Key: 'Purpose', Value: 'outage' }],
   });
   const attributes = template.findResources('AWS::Connect::DataTableAttribute') as Record<string, {

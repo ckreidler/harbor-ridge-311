@@ -807,7 +807,7 @@ export class ConnectStack extends cdk.Stack {
       description: 'One outage row. The flow plays message when active is true.',
       status: 'PUBLISHED',
       timeZone: 'America/Los_Angeles',
-      valueLockLevel: 'PRIMARY_VALUE',
+      valueLockLevel: 'NONE',
       tags: [{ key: 'Purpose', value: 'outage' }],
     });
     const outageKey = new connect.CfnDataTableAttribute(this, 'OutageKeyAttribute', {
