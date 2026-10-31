@@ -1,0 +1,24 @@
+{
+  "Actions": ["Save"],
+  "Template": {
+    "Head": {
+      "Title": "Harbor Ridge 311 outage",
+      "Configuration": {
+        "Layout": {
+          "Columns": ["12"]
+        }
+      }
+    },
+    "Body": [
+      {
+        "_id": "outage-table",
+        "Type": "DataTable",
+        "Props": {
+          "Id": "outage-table",
+          "DataTableArn": "__OUTAGE_DATA_TABLE_ARN__"
+        },
+        "Content": []
+      }
+    ]
+  }
+}
