@@ -346,7 +346,7 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
   template.resourceCountIs('AWS::Wisdom::AIAgentVersion', 2);
   template.resourceCountIs('AWS::Wisdom::AIPrompt', 2);
   template.resourceCountIs('AWS::Wisdom::AIPromptVersion', 2);
-  template.resourceCountIs('AWS::Connect::SecurityProfile', 3);
+  template.resourceCountIs('AWS::Connect::SecurityProfile', 2);
   template.resourceCountIs('AWS::Lex::Bot', 1);
   template.resourceCountIs('AWS::Lex::BotVersion', 1);
   template.resourceCountIs('AWS::Lex::BotAlias', 1);
@@ -1158,7 +1158,7 @@ test('ConnectStack transfers an in-hours escalation and keeps the agent password
   const profiles = Object.values(template.findResources('AWS::Connect::SecurityProfile')) as Array<{
     Properties: { Permissions: string[] };
   }>;
-  expect(profiles).toHaveLength(3);
+  expect(profiles).toHaveLength(2);
   for (const profile of profiles) {
     expect(profile.Properties.Permissions.some((permission) => permission.includes('*'))).toBe(false);
   }
@@ -1196,7 +1196,7 @@ test('ConnectStack transfers an in-hours escalation and keeps the agent password
     };
   }>;
   const secretIds = Object.keys(secrets);
-  expect(secretIds).toHaveLength(2);
+  expect(secretIds).toHaveLength(1);
   const outputs = template.toJSON().Outputs as Record<string, { Value: { Ref: string } }>;
   const agentSecretId = outputs.AgentPasswordSecretArn?.Value.Ref;
   expect(agentSecretId).toBeDefined();
@@ -1272,13 +1272,13 @@ test('ConnectStack transfers an in-hours escalation and keeps the agent password
   expect(assistants).not.toContain('MANUAL_SEARCH');
 });
 
-test('ConnectStack seeds an outage row and a supervisor workspace page', () => {
+test('ConnectStack seeds an outage row the main flow can read', () => {
   const app = new cdk.App();
   const template = Template.fromStack(new ConnectStack(app, 'ConnectStack'));
 
   template.hasResourceProperties('AWS::Connect::DataTable', {
     Name: 'HarborRidge311-Outage',
-    Description: 'One outage row. Supervisors edit it from the supervisor workspace.',
+    Description: 'One outage row. The flow plays message when active is true.',
     Status: 'PUBLISHED',
     TimeZone: 'America/Los_Angeles',
     ValueLockLevel: 'PRIMARY_VALUE',
@@ -1328,72 +1328,12 @@ test('ConnectStack seeds an outage row and a supervisor workspace page', () => {
     },
   });
 
-  const view = template.findResources('AWS::Connect::View') as Record<string, {
-    DeletionPolicy?: string;
-    UpdateReplacePolicy?: string;
-    Properties: { Name: string; Actions: string[]; Template: { Body: Array<{ Type: string; Props: { DataTableArn: unknown } }> } };
-  }>;
-  expect(Object.keys(view)).toEqual(['OutageView']);
-  expect(view.OutageView?.DeletionPolicy).not.toBe('Retain');
-  expect(view.OutageView?.UpdateReplacePolicy).not.toBe('Retain');
-  expect(view.OutageView?.Properties.Actions).toEqual(['Save']);
-  expect(view.OutageView?.Properties.Template.Body).toEqual([{
-    _id: 'outage-table',
-    Type: 'DataTable',
-    Props: {
-      Id: 'outage-table',
-      DataTableArn: { 'Fn::GetAtt': ['OutageTable', 'Arn'] },
-    },
-    Content: [],
-  }]);
-
-  template.hasResourceProperties('AWS::Connect::ViewVersion', {
-    ViewArn: { 'Fn::GetAtt': ['OutageView', 'ViewArn'] },
-    ViewContentSha256: { 'Fn::GetAtt': ['OutageView', 'ViewContentSha256'] },
-    VersionDescription: 'Outage data table page',
-  });
-  template.hasResourceProperties('AWS::Connect::Workspace', {
-    Name: 'HarborRidge311-Supervisor',
-    Visibility: 'ASSIGNED',
-    Associations: [{ 'Fn::GetAtt': ['SupervisorUser', 'UserArn'] }],
-    Pages: [{
-      Page: 'outage',
-      Slug: 'outage',
-      ResourceArn: { 'Fn::GetAtt': ['OutageViewVersion', 'ViewVersionArn'] },
-    }],
-  });
-  template.hasResourceProperties('AWS::Connect::SecurityProfile', {
-    SecurityProfileName: 'HarborRidge311-Supervisor',
-    Permissions: [
-      'BasicAgentAccess',
-      'CustomViews.Access',
-      'Views.View',
-      'Workspaces.View',
-      'DataTables.View',
-      'DataTables.ManageValues',
-    ],
-    GranularAccessControlConfiguration: {
-      DataTableAccessControlConfiguration: {
-        PrimaryAttributeAccessControlConfiguration: {
-          PrimaryAttributeValues: [{
-            AccessType: 'ALLOW',
-            AttributeName: 'key',
-            Values: ['outage'],
-          }],
-        },
-      },
-    },
-  });
-  const supervisorProfile = JSON.stringify(template.findResources('AWS::Connect::SecurityProfile').SupervisorSecurityProfile);
-  expect(supervisorProfile).not.toContain('*');
-  expect(supervisorProfile).not.toContain('TagRestrictedResources');
-
-  template.hasResourceProperties('AWS::Connect::User', {
-    Username: 'harborridge-supervisor',
-    SecurityProfileArns: [{ 'Fn::GetAtt': ['SupervisorSecurityProfile', 'SecurityProfileArn'] }],
-    RoutingProfileArn: { 'Fn::GetAtt': ['AgentRoutingProfile', 'RoutingProfileArn'] },
-  });
-  template.hasOutput('SupervisorPasswordSecretArn', {});
+  template.resourceCountIs('AWS::Connect::View', 0);
+  template.resourceCountIs('AWS::Connect::ViewVersion', 0);
+  template.resourceCountIs('AWS::Connect::Workspace', 0);
+  expect(Object.keys(template.findResources('AWS::Connect::User'))).toEqual(['AgentUser']);
+  expect(JSON.stringify(template.findResources('AWS::Connect::SecurityProfile'))).not.toContain('HarborRidge311-Supervisor');
+  expect(template.toJSON().Outputs.SupervisorPasswordSecretArn).toBeUndefined();
 
   const flow = contactFlow(template, 'HarborRidge311-Main');
   const content = mainDocument(flow.Properties.Content);
@@ -1413,12 +1353,7 @@ test('ConnectStack seeds an outage row and a supervisor workspace page', () => {
   expect(content.Actions.find((action) => action.Identifier === 'play-outage')?.Transitions?.NextAction)
     .toBe('lookup-prompts');
 
-  for (const type of [
-    'AWS::Connect::DataTable',
-    'AWS::Connect::View',
-    'AWS::Connect::ViewVersion',
-    'AWS::Connect::Workspace',
-  ]) {
+  for (const type of ['AWS::Connect::DataTable']) {
     for (const resource of Object.values(template.findResources(type)) as Array<{
       DeletionPolicy?: string;
       UpdateReplacePolicy?: string;
