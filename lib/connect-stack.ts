@@ -949,7 +949,11 @@ export class ConnectStack extends cdk.Stack {
       routingProfileArn: supervisorRoutingProfile.attrRoutingProfileArn,
       securityProfileArns: [supervisorSecurityProfile.attrSecurityProfileArn],
     });
-    const outageView = outageViewTemplate(outageDataTableId);
+    const outageView = outageViewTemplate(
+      outageDataTableId,
+      outageActive.attrAttributeId,
+      outageMessage.attrAttributeId,
+    );
     const outageViewResource = new connect.CfnView(this, 'OutageView', {
       instanceArn,
       name: 'HarborRidge311-OutageEditor',

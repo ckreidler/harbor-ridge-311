@@ -12,6 +12,8 @@ export const OUTAGE_INACTIVE_VALUE = 'false';
 export const OUTAGE_MESSAGE_MAX_LENGTH = 280;
 export const OUTAGE_PLACEHOLDER_MESSAGE = 'Harbor Ridge 3 1 1 has a service outage. You can still ask a question or leave a request.';
 export const OUTAGE_DATA_TABLE_ID_PLACEHOLDER = '__OUTAGE_DATA_TABLE_ID__';
+export const OUTAGE_ACTIVE_ATTRIBUTE_ID_PLACEHOLDER = '__OUTAGE_ACTIVE_ATTRIBUTE_ID__';
+export const OUTAGE_MESSAGE_ATTRIBUTE_ID_PLACEHOLDER = '__OUTAGE_MESSAGE_ATTRIBUTE_ID__';
 
 // describe-view returned Actions: []. The CloudFormation registry schema for
 // AWS::Connect::View requires the Actions property, caps the array at 1000,
@@ -20,11 +22,16 @@ export const OUTAGE_DATA_TABLE_ID_PLACEHOLDER = '__OUTAGE_DATA_TABLE_ID__';
 // array cap. An empty list is the export, so that is what we send.
 export const OUTAGE_VIEW_ACTIONS: readonly string[] = [];
 
+interface OutageViewAttribute {
+  Name: string;
+  AttributeId: string;
+}
+
 interface OutageDataTableProps {
   DataTable: string;
   Mode: string;
   Display: string;
-  Attributes: readonly unknown[];
+  Attributes: OutageViewAttribute[];
   PrimaryValues: readonly (readonly { AttributeName: string; Value: string }[])[];
 }
 
@@ -44,7 +51,11 @@ interface OutageViewTemplate {
   Body: OutageViewComponent[];
 }
 
-export function outageViewTemplate(dataTableId: string): {
+export function outageViewTemplate(
+  dataTableId: string,
+  activeAttributeId: string,
+  messageAttributeId: string,
+): {
   readonly actions: readonly string[];
   readonly template: OutageViewTemplate;
 } {
@@ -53,6 +64,7 @@ export function outageViewTemplate(dataTableId: string): {
   const [component, ...rest] = template.Body;
   const props = component?.Props;
   const primary = props?.PrimaryValues;
+  const [active, message, ...extraAttributes] = props?.Attributes ?? [];
   if (
     rest.length > 0
     || component?.Type !== 'DataTable'
@@ -61,7 +73,15 @@ export function outageViewTemplate(dataTableId: string): {
     || props?.DataTable !== OUTAGE_DATA_TABLE_ID_PLACEHOLDER
     || props.Mode !== 'ReadAndWrite'
     || props.Display !== 'Form'
-    || JSON.stringify(props.Attributes) !== JSON.stringify([OUTAGE_ACTIVE_ATTRIBUTE, OUTAGE_MESSAGE_ATTRIBUTE])
+    || extraAttributes.length > 0
+    || active === undefined
+    || message === undefined
+    || Object.keys(active).join(',') !== 'Name,AttributeId'
+    || active.Name !== OUTAGE_ACTIVE_ATTRIBUTE
+    || active.AttributeId !== OUTAGE_ACTIVE_ATTRIBUTE_ID_PLACEHOLDER
+    || Object.keys(message).join(',') !== 'Name,AttributeId'
+    || message.Name !== OUTAGE_MESSAGE_ATTRIBUTE
+    || message.AttributeId !== OUTAGE_MESSAGE_ATTRIBUTE_ID_PLACEHOLDER
     || primary?.length !== 1
     || primary[0]?.length !== 1
     || primary[0][0]?.AttributeName !== OUTAGE_KEY_ATTRIBUTE
@@ -80,6 +100,10 @@ export function outageViewTemplate(dataTableId: string): {
         Props: {
           ...props,
           DataTable: dataTableId,
+          Attributes: [
+            { ...active, AttributeId: activeAttributeId },
+            { ...message, AttributeId: messageAttributeId },
+          ],
         },
       }],
     },

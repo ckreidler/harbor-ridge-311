@@ -1351,13 +1351,18 @@ test('ConnectStack seeds an outage row the main flow can read', () => {
         },
         Mode: 'ReadAndWrite',
         Display: 'Form',
-        Attributes: ['active', 'message'],
+        Attributes: [
+          { Name: 'active', AttributeId: { 'Fn::GetAtt': ['OutageActiveAttribute', 'AttributeId'] } },
+          { Name: 'message', AttributeId: { 'Fn::GetAtt': ['OutageMessageAttribute', 'AttributeId'] } },
+        ],
         PrimaryValues: [[{ AttributeName: 'key', Value: 'outage' }]],
       },
       Content: [],
     }],
   });
   expect(JSON.stringify(view)).not.toContain('0888b812-dd4b-453c-9206-e36f8f20cf8f');
+  expect(JSON.stringify(view)).not.toContain('a18a44d4-4e81-4e1f-8f2d-3784fd6f330e');
+  expect(JSON.stringify(view)).not.toContain('2aab2072-f7f0-4cb7-93a6-413ae859e977');
   expect(view.OutageView?.DeletionPolicy).not.toBe('Retain');
   expect(view.OutageView?.UpdateReplacePolicy).not.toBe('Retain');
 
