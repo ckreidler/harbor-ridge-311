@@ -17,7 +17,7 @@
       "Props": {
         "DataTable": "__OUTAGE_DATA_TABLE_ID__",
         "Mode": "ReadAndWrite",
-        "Display": "TableAndForm",
+        "Display": "Form",
         "Attributes": [],
         "PrimaryValues": [
           [

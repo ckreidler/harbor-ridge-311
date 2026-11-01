@@ -60,7 +60,7 @@ export function outageViewTemplate(dataTableId: string): {
     || Object.keys(props ?? {}).join(',') !== 'DataTable,Mode,Display,Attributes,PrimaryValues'
     || props?.DataTable !== OUTAGE_DATA_TABLE_ID_PLACEHOLDER
     || props.Mode !== 'ReadAndWrite'
-    || props.Display !== 'TableAndForm'
+    || props.Display !== 'Form'
     || props.Attributes.length !== 0
     || primary?.length !== 1
     || primary[0]?.length !== 1

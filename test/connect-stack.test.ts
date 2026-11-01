@@ -1350,7 +1350,7 @@ test('ConnectStack seeds an outage row the main flow can read', () => {
           'Fn::Select': [3, { 'Fn::Split': ['/', { 'Fn::GetAtt': ['OutageTable', 'Arn'] }] }],
         },
         Mode: 'ReadAndWrite',
-        Display: 'TableAndForm',
+        Display: 'Form',
         Attributes: [],
         PrimaryValues: [[{ AttributeName: 'key', Value: 'outage' }]],
       },
