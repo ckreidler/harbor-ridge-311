@@ -99,15 +99,18 @@ test('ConnectStack looks up the English prompts and associates the sandbox numbe
   const template = Template.fromStack(new ConnectStack(app, 'ConnectStack'));
 
   template.resourceCountIs('AWS::Connect::ContactFlow', 3);
-  template.resourceCountIs('AWS::Connect::DataTable', 1);
-  template.resourceCountIs('AWS::Connect::DataTableAttribute', 4);
-  template.resourceCountIs('AWS::Connect::DataTableRecord', 10);
+  template.resourceCountIs('AWS::Connect::DataTable', 2);
+  template.resourceCountIs('AWS::Connect::DataTableAttribute', 7);
+  template.resourceCountIs('AWS::Connect::DataTableRecord', 11);
 
   template.hasResourceProperties('AWS::Connect::DataTable', {
     Name: 'HarborRidge311-PromptsByChannel',
     Status: 'PUBLISHED',
   });
-  expect(Object.keys(template.findResources('AWS::Connect::DataTable'))).toEqual(['PromptsByChannel']);
+  expect(Object.keys(template.findResources('AWS::Connect::DataTable')).sort()).toEqual([
+    'OutageTable',
+    'PromptsByChannel',
+  ]);
   const tableChildren = JSON.stringify({
     ...template.findResources('AWS::Connect::DataTableAttribute'),
     ...template.findResources('AWS::Connect::DataTableRecord'),
@@ -140,7 +143,10 @@ test('ConnectStack looks up the English prompts and associates the sandbox numbe
       };
     };
   }>;
-  const rows = Object.values(recordResources).map((record) => ({
+  const promptRecordResources = Object.fromEntries(
+    Object.entries(recordResources).filter(([id]) => id !== 'OutageRecord'),
+  );
+  const rows = Object.values(promptRecordResources).map((record) => ({
     key: record.Properties.DataTableRecord.PrimaryValues.map((value) => value.AttributeValue).sort(),
     text: record.Properties.DataTableRecord.Values.map((value) => value.AttributeValue),
   }));
@@ -181,7 +187,7 @@ test('ConnectStack looks up the English prompts and associates the sandbox numbe
 
   expect(JSON.stringify(flow.Properties.Content)).toContain('PromptsByChannel');
   expect(JSON.stringify(flow.Properties.Content)).toContain('$.Channel');
-  const lookup = content.Actions.find((action) => action.Type === 'EvaluateDataTableValues');
+  const lookup = content.Actions.find((action) => action.Identifier === 'lookup-prompts');
   expect(lookup?.Parameters?.Queries).toEqual(['Greeting', 'Goodbye', 'Question'].map((prompt) => ({
     QueryName: prompt,
     Attributes: ['Text'],
@@ -204,7 +210,7 @@ test('ConnectStack looks up the English prompts and associates the sandbox numbe
   expect(content.Actions.some((action) => action.Identifier === 'branch-channel')).toBe(false);
   expect(content.Actions.some((action) => action.Identifier === 'set-chat-prompts')).toBe(false);
   expect(content.Actions.find((action) => action.Identifier === 'set-en-voice')?.Transitions?.NextAction)
-    .toBe('lookup-prompts');
+    .toBe('lookup-outage');
   const synthesized = JSON.stringify(content);
   expect(synthesized).not.toContain('Welcome to Harbor Ridge 311 chat');
   expect(synthesized).not.toContain('Say agent');
@@ -340,7 +346,7 @@ test('ConnectStack answers city questions from Q in Connect and falls back to go
   template.resourceCountIs('AWS::Wisdom::AIAgentVersion', 2);
   template.resourceCountIs('AWS::Wisdom::AIPrompt', 2);
   template.resourceCountIs('AWS::Wisdom::AIPromptVersion', 2);
-  template.resourceCountIs('AWS::Connect::SecurityProfile', 2);
+  template.resourceCountIs('AWS::Connect::SecurityProfile', 3);
   template.resourceCountIs('AWS::Lex::Bot', 1);
   template.resourceCountIs('AWS::Lex::BotVersion', 1);
   template.resourceCountIs('AWS::Lex::BotAlias', 1);
@@ -793,7 +799,7 @@ test('ConnectStack opens an after-hours case and removes voicemail', () => {
   expect(main.Actions.some((action) => action.Identifier === 'transfer-after-hours')).toBe(false);
   expect(main.Actions.some((action) => action.Type === 'TransferToFlow')).toBe(false);
   expect(main.Actions.find((action) => action.Identifier === 'set-en-voice')?.Transitions?.NextAction)
-    .toBe('lookup-prompts');
+    .toBe('lookup-outage');
   expect(main.Actions.some((action) => action.Identifier === 'select-language')).toBe(false);
   expect(Object.keys(template.findResources('AWS::Connect::ContactFlow')).some((id) => id.startsWith('AfterHours')))
     .toBe(false);
@@ -1152,7 +1158,7 @@ test('ConnectStack transfers an in-hours escalation and keeps the agent password
   const profiles = Object.values(template.findResources('AWS::Connect::SecurityProfile')) as Array<{
     Properties: { Permissions: string[] };
   }>;
-  expect(profiles).toHaveLength(2);
+  expect(profiles).toHaveLength(3);
   for (const profile of profiles) {
     expect(profile.Properties.Permissions.some((permission) => permission.includes('*'))).toBe(false);
   }
@@ -1190,8 +1196,11 @@ test('ConnectStack transfers an in-hours escalation and keeps the agent password
     };
   }>;
   const secretIds = Object.keys(secrets);
-  expect(secretIds).toHaveLength(1);
-  const secret = secrets[secretIds[0]!];
+  expect(secretIds).toHaveLength(2);
+  const outputs = template.toJSON().Outputs as Record<string, { Value: { Ref: string } }>;
+  const agentSecretId = outputs.AgentPasswordSecretArn?.Value.Ref;
+  expect(agentSecretId).toBeDefined();
+  const secret = secrets[agentSecretId!];
   expect(secret?.Properties.SecretString).toBeUndefined();
   expect(secret?.Properties.GenerateSecretString?.PasswordLength).toBe(32);
   expect(secret?.Properties.GenerateSecretString?.RequireEachIncludedType).toBe(true);
@@ -1201,8 +1210,12 @@ test('ConnectStack transfers an in-hours escalation and keeps the agent password
   const templateText = JSON.stringify(template.toJSON());
   expect(templateText).not.toMatch(/"Password"\s*:\s*"(?!\{\{resolve:secretsmanager:)/);
   template.hasOutput('AgentPasswordSecretArn', {
-    Value: { Ref: secretIds[0] },
+    Value: { Ref: agentSecretId },
   });
+  for (const id of secretIds) {
+    expect(secrets[id]?.DeletionPolicy).toBe('Delete');
+    expect(secrets[id]?.Properties.GenerateSecretString?.PasswordLength).toBe(32);
+  }
 
   const mainRaw = JSON.stringify(contactFlow(template, 'HarborRidge311-Main').Properties.Content);
   expect(mainRaw).toContain('DefaultAgentUI');
@@ -1257,6 +1270,207 @@ test('ConnectStack transfers an in-hours escalation and keeps the agent password
   expect(assistants).toContain('ORCHESTRATION');
   expect(assistants).not.toContain('ANSWER_RECOMMENDATION');
   expect(assistants).not.toContain('MANUAL_SEARCH');
+});
+
+test('ConnectStack seeds an outage row the main flow can read', () => {
+  const app = new cdk.App();
+  const template = Template.fromStack(new ConnectStack(app, 'ConnectStack'));
+
+  template.hasResourceProperties('AWS::Connect::DataTable', {
+    Name: 'HarborRidge311-Outage',
+    Description: 'One outage row. The flow plays message when active is true.',
+    Status: 'PUBLISHED',
+    TimeZone: 'America/Los_Angeles',
+    ValueLockLevel: 'NONE',
+    Tags: [{ Key: 'Purpose', Value: 'outage' }],
+  });
+  const attributes = template.findResources('AWS::Connect::DataTableAttribute') as Record<string, {
+    Properties: {
+      Name: string;
+      Primary?: boolean;
+      ValueType: string;
+      Validation?: { MinLength?: number; MaxLength?: number };
+    };
+  }>;
+  expect(attributes.OutageKeyAttribute?.Properties).toMatchObject({
+    Name: 'key',
+    Primary: true,
+    ValueType: 'TEXT',
+  });
+  expect(attributes.OutageActiveAttribute?.Properties).toMatchObject({
+    Name: 'active',
+    ValueType: 'BOOLEAN',
+  });
+  expect(attributes.OutageActiveAttribute?.Properties.Primary).toBeUndefined();
+  expect(attributes.OutageMessageAttribute?.Properties).toMatchObject({
+    Name: 'message',
+    ValueType: 'TEXT',
+    Validation: { MinLength: 1, MaxLength: 280 },
+  });
+  expect(attributes.OutageMessageAttribute?.Properties.Primary).toBeUndefined();
+
+  template.hasResourceProperties('AWS::Connect::DataTableRecord', {
+    DataTableRecord: {
+      PrimaryValues: [{
+        AttributeId: { 'Fn::GetAtt': ['OutageKeyAttribute', 'AttributeId'] },
+        AttributeValue: 'outage',
+      }],
+      Values: [
+        {
+          AttributeId: { 'Fn::GetAtt': ['OutageActiveAttribute', 'AttributeId'] },
+          AttributeValue: 'false',
+        },
+        {
+          AttributeId: { 'Fn::GetAtt': ['OutageMessageAttribute', 'AttributeId'] },
+          AttributeValue: 'Harbor Ridge 3 1 1 has a service outage. You can still ask a question or leave a request.',
+        },
+      ],
+    },
+  });
+
+  const view = template.findResources('AWS::Connect::View') as Record<string, {
+    DeletionPolicy?: string;
+    UpdateReplacePolicy?: string;
+    Properties: { Name: string; Actions: string[]; Template: unknown };
+  }>;
+  expect(Object.keys(view)).toEqual(['OutageView']);
+  expect(view.OutageView?.Properties.Name).toBe('HarborRidge311-OutageEditor');
+  expect(view.OutageView?.Properties.Actions).toEqual([]);
+  expect(view.OutageView?.Properties.Template).toEqual({
+    Head: {
+      Configuration: { Layout: { Columns: [12] } },
+      Integrations: [],
+      Title: 'HarborRidge311-OutageEditor',
+    },
+    Body: [{
+      _id: 'DataTable_1793494978541',
+      Type: 'DataTable',
+      Props: {
+        DataTable: {
+          'Fn::Select': [3, { 'Fn::Split': ['/', { 'Fn::GetAtt': ['OutageTable', 'Arn'] }] }],
+        },
+        Mode: 'ReadAndWrite',
+        Display: 'Form',
+        Attributes: [
+          { Name: 'active', AttributeId: { 'Fn::GetAtt': ['OutageActiveAttribute', 'AttributeId'] } },
+          { Name: 'message', AttributeId: { 'Fn::GetAtt': ['OutageMessageAttribute', 'AttributeId'] } },
+        ],
+        PrimaryValues: [[{ AttributeName: 'key', Value: 'outage' }]],
+      },
+      Content: [],
+    }],
+  });
+  expect(JSON.stringify(view)).not.toContain('0888b812-dd4b-453c-9206-e36f8f20cf8f');
+  expect(JSON.stringify(view)).not.toContain('a18a44d4-4e81-4e1f-8f2d-3784fd6f330e');
+  expect(JSON.stringify(view)).not.toContain('2aab2072-f7f0-4cb7-93a6-413ae859e977');
+  expect(view.OutageView?.DeletionPolicy).not.toBe('Retain');
+  expect(view.OutageView?.UpdateReplacePolicy).not.toBe('Retain');
+
+  template.hasResourceProperties('AWS::Connect::ViewVersion', {
+    ViewArn: { 'Fn::GetAtt': ['OutageView', 'ViewArn'] },
+    ViewContentSha256: { 'Fn::GetAtt': ['OutageView', 'ViewContentSha256'] },
+    VersionDescription: 'Outage data table page',
+  });
+  template.hasResourceProperties('AWS::Connect::Workspace', {
+    Name: 'HarborRidge311-Supervisor',
+    Visibility: 'ASSIGNED',
+    Associations: [{ 'Fn::GetAtt': ['SupervisorUser', 'UserArn'] }],
+    Pages: [{
+      Page: 'outage',
+      Slug: 'outage',
+      ResourceArn: { 'Fn::GetAtt': ['OutageViewVersion', 'ViewVersionArn'] },
+    }],
+  });
+
+  const supervisorRouting = template.findResources('AWS::Connect::RoutingProfile').SupervisorRoutingProfile as {
+    Properties: {
+      QueueConfigs?: unknown;
+      ManualAssignmentQueueConfigs?: unknown;
+    };
+  };
+  expect(supervisorRouting.Properties.QueueConfigs).toBeUndefined();
+  expect(supervisorRouting.Properties.ManualAssignmentQueueConfigs).toBeUndefined();
+  template.hasResourceProperties('AWS::Connect::RoutingProfile', {
+    Name: 'HarborRidge311-Supervisor',
+    DefaultOutboundQueueArn: { 'Fn::GetAtt': ['GeneralQueue', 'QueueArn'] },
+    MediaConcurrencies: [
+      { Channel: 'VOICE', Concurrency: 1 },
+      { Channel: 'CHAT', Concurrency: 1 },
+    ],
+  });
+
+  template.hasResourceProperties('AWS::Connect::SecurityProfile', {
+    SecurityProfileName: 'HarborRidge311-Supervisor',
+    Permissions: [
+      'BasicAgentAccess',
+      'CustomViews.Access',
+      'Views.View',
+      'Workspaces.View',
+      'DataTables.View',
+      'DataTables.ManageValues',
+    ],
+    GranularAccessControlConfiguration: {
+      DataTableAccessControlConfiguration: {
+        PrimaryAttributeAccessControlConfiguration: {
+          PrimaryAttributeValues: [{
+            AccessType: 'ALLOW',
+            AttributeName: 'key',
+            Values: ['outage'],
+          }],
+        },
+      },
+    },
+  });
+  const supervisorProfile = JSON.stringify(template.findResources('AWS::Connect::SecurityProfile').SupervisorSecurityProfile);
+  expect(supervisorProfile).not.toContain('*');
+  expect(supervisorProfile).not.toContain('Prompt');
+  expect(supervisorProfile).not.toContain('Channel');
+  expect(supervisorProfile).not.toContain('TagRestrictedResources');
+
+  template.hasResourceProperties('AWS::Connect::User', {
+    Username: 'harborridge-supervisor',
+    SecurityProfileArns: [{ 'Fn::GetAtt': ['SupervisorSecurityProfile', 'SecurityProfileArn'] }],
+    RoutingProfileArn: { 'Fn::GetAtt': ['SupervisorRoutingProfile', 'RoutingProfileArn'] },
+  });
+  template.hasOutput('SupervisorPasswordSecretArn', {});
+
+  const flow = contactFlow(template, 'HarborRidge311-Main');
+  const content = mainDocument(flow.Properties.Content);
+  const outageLookup = content.Actions.find((action) => action.Identifier === 'lookup-outage');
+  expect(outageLookup?.Type).toBe('EvaluateDataTableValues');
+  expect(JSON.stringify(flow.Properties.Content)).toContain('OutageTable');
+  expect(outageLookup?.Parameters?.Queries).toEqual([{
+    QueryName: 'Outage',
+    Attributes: ['active', 'message'],
+    PrimaryValues: [{ AttributeName: 'key', Value: 'outage' }],
+  }]);
+  expect(outageLookup?.Transitions?.NextAction).toBe('check-outage');
+  expect(outageLookup?.Transitions?.Errors?.[0]).toEqual({
+    ErrorType: 'NoMatchingError',
+    NextAction: 'lookup-prompts',
+  });
+  expect(content.Actions.find((action) => action.Identifier === 'play-outage')?.Transitions?.NextAction)
+    .toBe('lookup-prompts');
+
+  for (const type of [
+    'AWS::Connect::DataTable',
+    'AWS::Connect::View',
+    'AWS::Connect::ViewVersion',
+    'AWS::Connect::Workspace',
+  ]) {
+    for (const resource of Object.values(template.findResources(type)) as Array<{
+      DeletionPolicy?: string;
+      UpdateReplacePolicy?: string;
+    }>) {
+      expect(resource.DeletionPolicy).not.toBe('Retain');
+      expect(resource.UpdateReplacePolicy).not.toBe('Retain');
+    }
+  }
+
+  const hours = template.findResources('AWS::Connect::HoursOfOperation') as Record<string, {
+    Properties: { Name: string };
+  }>;
+  expect(hours.Hours?.Properties.Name).toBe('HarborRidge311-Hours');
 });
 
 test('ConnectStack hours can be overridden', () => {

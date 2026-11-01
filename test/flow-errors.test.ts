@@ -26,6 +26,7 @@ const allowedErrors: Record<string, readonly string[]> = {
 
 const flowProps = {
   dataTableId: 'table',
+  outageDataTableId: 'outage-table',
   wisdomAssistantArn: 'assistant',
   lexBotAliasArn: 'alias',
   orchestratorLambdaArn: 'orchestrator',
@@ -136,8 +137,39 @@ test('main flow looks up prompt text by channel and plays the greeting on succes
   expect(flow.Actions.some((action) => action.Identifier === 'set-chat-prompts')).toBe(false);
   expect(flow.Actions.some((action) => action.Identifier === 'set-voice-prompts')).toBe(false);
   expect(block('set-en-voice').Transitions).toMatchObject({
+    NextAction: 'lookup-outage',
+    Errors: [{ ErrorType: 'NoMatchingError', NextAction: 'lookup-outage' }],
+  });
+  expect(block('lookup-outage')).toMatchObject({
+    Type: 'EvaluateDataTableValues',
+    Parameters: {
+      DataTableId: 'outage-table',
+      Queries: [{
+        QueryName: 'Outage',
+        Attributes: ['active', 'message'],
+        PrimaryValues: [{ AttributeName: 'key', Value: 'outage' }],
+      }],
+    },
+    Transitions: {
+      NextAction: 'check-outage',
+      Errors: [{ ErrorType: 'NoMatchingError', NextAction: 'lookup-prompts' }],
+    },
+  });
+  expect(block('check-outage').Transitions).toMatchObject({
     NextAction: 'lookup-prompts',
-    Errors: [{ ErrorType: 'NoMatchingError', NextAction: 'lookup-prompts' }],
+    Conditions: [
+      { NextAction: 'play-outage', Condition: { Operator: 'Equals', Operands: ['true'] } },
+    ],
+    Errors: [{ ErrorType: 'NoMatchingCondition', NextAction: 'lookup-prompts' }],
+  });
+  expect(block('check-outage').Parameters.ComparisonValue).toBe('$.DataTables.Outage.active');
+  expect(block('play-outage')).toMatchObject({
+    Type: 'MessageParticipant',
+    Parameters: { Text: '$.DataTables.Outage.message' },
+    Transitions: {
+      NextAction: 'lookup-prompts',
+      Errors: [{ ErrorType: 'NoMatchingError', NextAction: 'lookup-prompts' }],
+    },
   });
   expect(block('lookup-prompts')).toMatchObject({
     Type: 'EvaluateDataTableValues',

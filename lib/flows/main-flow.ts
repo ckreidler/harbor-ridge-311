@@ -23,6 +23,14 @@ import {
   type DataTableQuery,
 } from '../flow';
 import {
+  OUTAGE_ACTIVE_ATTRIBUTE,
+  OUTAGE_ACTIVE_VALUE,
+  OUTAGE_KEY_ATTRIBUTE,
+  OUTAGE_MESSAGE_ATTRIBUTE,
+  OUTAGE_QUERY_NAME,
+  OUTAGE_ROW_KEY,
+} from '../outage';
+import {
   CUSTOMER_ID_ATTRIBUTE,
   IDENTITY_SOURCE_ANI,
   IDENTITY_SOURCE_ATTRIBUTE,
@@ -31,6 +39,7 @@ import {
 
 export interface MainFlowProps {
   dataTableId: string;
+  outageDataTableId: string;
   wisdomAssistantArn: string;
   lexBotAliasArn: string;
   orchestratorLambdaArn: string;
@@ -103,6 +112,24 @@ export function mainFlow(props: MainFlowProps): CompiledFlow<typeof CONTACT_FLOW
       updateContactTextToSpeechVoice('set-en-voice', {
         TextToSpeechVoice: 'Joanna',
         TextToSpeechEngine: 'Neural',
+      }, { next: 'lookup-outage', error: 'lookup-outage' }),
+      evaluateDataTableValues('lookup-outage', {
+        DataTableId: props.outageDataTableId,
+        Queries: [{
+          QueryName: OUTAGE_QUERY_NAME,
+          Attributes: [OUTAGE_ACTIVE_ATTRIBUTE, OUTAGE_MESSAGE_ATTRIBUTE],
+          PrimaryValues: [{ AttributeName: OUTAGE_KEY_ATTRIBUTE, Value: OUTAGE_ROW_KEY }],
+        }],
+      }, { next: 'check-outage', error: 'lookup-prompts' }),
+      compare('check-outage', {
+        ComparisonValue: `$.DataTables.${OUTAGE_QUERY_NAME}.${OUTAGE_ACTIVE_ATTRIBUTE}`,
+      }, {
+        next: 'lookup-prompts',
+        conditions: [equals(OUTAGE_ACTIVE_VALUE, 'play-outage')],
+        noMatch: 'lookup-prompts',
+      }),
+      messageParticipant('play-outage', {
+        Text: `$.DataTables.${OUTAGE_QUERY_NAME}.${OUTAGE_MESSAGE_ATTRIBUTE}`,
       }, { next: 'lookup-prompts', error: 'lookup-prompts' }),
       evaluateDataTableValues('lookup-prompts', {
         DataTableId: props.dataTableId,

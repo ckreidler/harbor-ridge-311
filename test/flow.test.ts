@@ -17,6 +17,7 @@ import { customerQueueFlow } from '../lib/flows/queue-flow';
 
 const flowProps = {
   dataTableId: 'table',
+  outageDataTableId: 'outage-table',
   wisdomAssistantArn: 'assistant',
   lexBotAliasArn: 'alias',
   orchestratorLambdaArn: 'orchestrator',

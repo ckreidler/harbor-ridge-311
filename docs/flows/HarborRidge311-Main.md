@@ -4,6 +4,9 @@
 flowchart TD
   n_enable_flow_logging(["enable-flow-logging<br/>UpdateFlowLoggingBehavior"])
   n_set_en_voice["set-en-voice<br/>UpdateContactTextToSpeechVoice"]
+  n_lookup_outage["lookup-outage<br/>EvaluateDataTableValues"]
+  n_check_outage["check-outage<br/>Compare"]
+  n_play_outage["play-outage<br/>MessageParticipant"]
   n_lookup_prompts["lookup-prompts<br/>EvaluateDataTableValues"]
   n_play_greeting["play-greeting<br/>MessageParticipant"]
   n_branch_identity["branch-identity<br/>Compare"]
@@ -38,7 +41,12 @@ flowchart TD
   n_play_fallback["play-fallback<br/>MessageParticipant"]
   n_disconnect["disconnect<br/>DisconnectParticipant"]
   n_enable_flow_logging -->|"next"| n_set_en_voice
-  n_set_en_voice -->|"NoMatchingError"| n_lookup_prompts
+  n_set_en_voice -->|"NoMatchingError"| n_lookup_outage
+  n_lookup_outage -->|"next"| n_check_outage
+  n_lookup_outage -->|"NoMatchingError"| n_lookup_prompts
+  n_check_outage -->|"true"| n_play_outage
+  n_check_outage -->|"NoMatchingCondition"| n_lookup_prompts
+  n_play_outage -->|"NoMatchingError"| n_lookup_prompts
   n_lookup_prompts -->|"next"| n_play_greeting
   n_lookup_prompts -->|"NoMatchingError"| n_play_fallback
   n_play_greeting -->|"next"| n_branch_identity
