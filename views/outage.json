@@ -18,7 +18,7 @@
         "DataTable": "__OUTAGE_DATA_TABLE_ID__",
         "Mode": "ReadAndWrite",
         "Display": "Form",
-        "Attributes": [],
+        "Attributes": ["active", "message"],
         "PrimaryValues": [
           [
             {

@@ -61,7 +61,7 @@ export function outageViewTemplate(dataTableId: string): {
     || props?.DataTable !== OUTAGE_DATA_TABLE_ID_PLACEHOLDER
     || props.Mode !== 'ReadAndWrite'
     || props.Display !== 'Form'
-    || props.Attributes.length !== 0
+    || JSON.stringify(props.Attributes) !== JSON.stringify([OUTAGE_ACTIVE_ATTRIBUTE, OUTAGE_MESSAGE_ATTRIBUTE])
     || primary?.length !== 1
     || primary[0]?.length !== 1
     || primary[0][0]?.AttributeName !== OUTAGE_KEY_ATTRIBUTE

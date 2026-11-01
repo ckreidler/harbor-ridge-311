@@ -1351,7 +1351,7 @@ test('ConnectStack seeds an outage row the main flow can read', () => {
         },
         Mode: 'ReadAndWrite',
         Display: 'Form',
-        Attributes: [],
+        Attributes: ['active', 'message'],
         PrimaryValues: [[{ AttributeName: 'key', Value: 'outage' }]],
       },
       Content: [],
