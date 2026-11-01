@@ -1,0 +1,34 @@
+{
+  "Head": {
+    "Configuration": {
+      "Layout": {
+        "Columns": [
+          12
+        ]
+      }
+    },
+    "Integrations": [],
+    "Title": "HarborRidge311-OutageEditor"
+  },
+  "Body": [
+    {
+      "_id": "DataTable_1793494978541",
+      "Type": "DataTable",
+      "Props": {
+        "DataTable": "__OUTAGE_DATA_TABLE_ID__",
+        "Mode": "ReadAndWrite",
+        "Display": "TableAndForm",
+        "Attributes": [],
+        "PrimaryValues": [
+          [
+            {
+              "AttributeName": "key",
+              "Value": "outage"
+            }
+          ]
+        ]
+      },
+      "Content": []
+    }
+  ]
+}
