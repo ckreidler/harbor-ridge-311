@@ -2,6 +2,12 @@ import type { FlowContent } from './flow';
 import { diagramPage } from './mermaid';
 import { ESCALATION_GUIDE_FLOW_NAME, escalationGuideFlow } from '../flows/escalation-guide-flow';
 import { MAIN_FLOW_NAME, mainFlow, type MainFlowProps } from '../flows/main-flow';
+import {
+  MAJOR_INCIDENT_FLOW_NAME,
+  MAJOR_INCIDENT_QUEUE_FLOW_NAME,
+  majorIncidentFlow,
+  majorIncidentQueueFlow,
+} from '../flows/major-incident-flow';
 import { customerQueueFlow, QUEUE_FLOW_NAME } from '../flows/queue-flow';
 
 const mainFlowProps: MainFlowProps = {
@@ -37,5 +43,10 @@ export function flowPages(): FlowPage[] {
     page(ESCALATION_GUIDE_FLOW_NAME, escalationGuideFlow({
       detailViewArn: 'view',
     }).content),
+    page(MAJOR_INCIDENT_FLOW_NAME, majorIncidentFlow({
+      queueArn: 'queue',
+      customerQueueFlowArn: 'queue-flow',
+    }).content),
+    page(MAJOR_INCIDENT_QUEUE_FLOW_NAME, majorIncidentQueueFlow().content),
   ];
 }

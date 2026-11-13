@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { Template } from 'aws-cdk-lib/assertions';
 import * as cdk from 'aws-cdk-lib/core';
 import { ConnectStack, CUSTOMER_QUEUE_PROMPT_ID } from '../lib/connect-stack';
+import { incidentOpenApiDocument } from '../lib/incidents/openapi';
 import { ticketOpenApiDocument } from '../lib/tickets/openapi';
 import {
   AFTER_HOURS_CLOSED_TEXT,
@@ -98,7 +99,7 @@ test('ConnectStack looks up the English prompts and associates the sandbox numbe
   const app = new cdk.App();
   const template = Template.fromStack(new ConnectStack(app, 'ConnectStack'));
 
-  template.resourceCountIs('AWS::Connect::ContactFlow', 3);
+  template.resourceCountIs('AWS::Connect::ContactFlow', 5);
   template.resourceCountIs('AWS::Connect::DataTable', 2);
   template.resourceCountIs('AWS::Connect::DataTableAttribute', 7);
   template.resourceCountIs('AWS::Connect::DataTableRecord', 11);
@@ -1042,6 +1043,7 @@ test('ConnectStack stores customer-scoped tickets behind an IAM API and a JWT ga
       '__Tickets___listMyTickets',
       '__Tickets___updateTicket',
     ]);
+    expect(JSON.stringify(agent)).toContain('__Incidents___reportMajorIncident');
     expect(JSON.stringify(agent)).toContain('GatewayIdentifier');
     expect(JSON.stringify(agent)).toContain('gateway_');
     expect(JSON.stringify(agent)).not.toContain('harborridge311tickets-');
@@ -1056,6 +1058,7 @@ test('ConnectStack stores customer-scoped tickets behind an IAM API and a JWT ga
         'Tickets___listMyTickets',
         'Tickets___updateTicket',
         'Tickets___closeTicket',
+        'Incidents___reportMajorIncident',
       ],
     }],
   });
@@ -1388,7 +1391,6 @@ test('ConnectStack seeds an outage row the main flow can read', () => {
       ManualAssignmentQueueConfigs?: unknown;
     };
   };
-  expect(supervisorRouting.Properties.QueueConfigs).toBeUndefined();
   expect(supervisorRouting.Properties.ManualAssignmentQueueConfigs).toBeUndefined();
   template.hasResourceProperties('AWS::Connect::RoutingProfile', {
     Name: 'HarborRidge311-Supervisor',
@@ -1396,7 +1398,16 @@ test('ConnectStack seeds an outage row the main flow can read', () => {
     MediaConcurrencies: [
       { Channel: 'VOICE', Concurrency: 1 },
       { Channel: 'CHAT', Concurrency: 1 },
+      { Channel: 'TASK', Concurrency: 5 },
     ],
+    QueueConfigs: [{
+      Delay: 0,
+      Priority: 1,
+      QueueReference: {
+        Channel: 'TASK',
+        QueueArn: { 'Fn::GetAtt': ['MajorIncidentQueue', 'QueueArn'] },
+      },
+    }],
   });
 
   template.hasResourceProperties('AWS::Connect::SecurityProfile', {
@@ -1493,4 +1504,162 @@ test('ConnectStack hours can be overridden', () => {
       EndTime: { Hours: 13, Minutes: 0 },
     }],
   });
+});
+
+test('ConnectStack reports a major incident as a task and an SNS message', () => {
+  const app = new cdk.App();
+  const template = Template.fromStack(new ConnectStack(app, 'ConnectStack'));
+  const days = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+  template.hasResourceProperties('AWS::Connect::HoursOfOperation', {
+    Name: 'HarborRidge311-MajorIncidentHours',
+    TimeZone: 'America/Los_Angeles',
+    Config: days.map((day) => ({
+      Day: day,
+      StartTime: { Hours: 0, Minutes: 0 },
+      EndTime: { Hours: 23, Minutes: 59 },
+    })),
+  });
+  template.hasResourceProperties('AWS::Connect::Queue', {
+    Name: 'HarborRidge311-MajorIncidents',
+    Status: 'ENABLED',
+    HoursOfOperationArn: { 'Fn::GetAtt': ['MajorIncidentHours', 'HoursOfOperationArn'] },
+  });
+  template.resourceCountIs('AWS::Connect::RoutingProfile', 2);
+  const queueArn = { 'Fn::GetAtt': ['MajorIncidentQueue', 'QueueArn'] };
+  template.hasResourceProperties('AWS::Connect::RoutingProfile', {
+    Name: 'HarborRidge311-Supervisor',
+    DefaultOutboundQueueArn: { 'Fn::GetAtt': ['GeneralQueue', 'QueueArn'] },
+    MediaConcurrencies: [
+      { Channel: 'VOICE', Concurrency: 1 },
+      { Channel: 'CHAT', Concurrency: 1 },
+      { Channel: 'TASK', Concurrency: 5 },
+    ],
+    QueueConfigs: [{
+      Delay: 0,
+      Priority: 1,
+      QueueReference: { Channel: 'TASK', QueueArn: queueArn },
+    }],
+  });
+  template.resourceCountIs('AWS::Connect::User', 2);
+  template.resourceCountIs('AWS::SNS::Topic', 1);
+  template.resourceCountIs('AWS::SNS::Subscription', 0);
+  template.hasResourceProperties('AWS::SNS::Topic', {
+    TopicName: 'HarborRidge311-MajorIncidents',
+  });
+  const topics = template.findResources('AWS::SNS::Topic') as Record<string, {
+    DeletionPolicy?: string;
+    Properties: { TopicName: string };
+  }>;
+  const topic = Object.entries(topics).find(([, resource]) => resource.Properties.TopicName === 'HarborRidge311-MajorIncidents');
+  expect(topic?.[1].DeletionPolicy ?? 'Delete').toBe('Delete');
+  template.hasOutput('MajorIncidentsTopicArn', {});
+  expect(JSON.stringify(template.toJSON().Outputs.MajorIncidentsTopicArn)).toContain(topic?.[0]);
+
+  expect(contactFlow(template, 'HarborRidge311-MajorIncident').Properties.Type).toBe('CONTACT_FLOW');
+  expect(contactFlow(template, 'HarborRidge311-MajorIncidentQueue').Properties.Type).toBe('CUSTOMER_QUEUE');
+  const incidentFlow = flowDocument(contactFlow(template, 'HarborRidge311-MajorIncident').Properties.Content);
+  expect(incidentFlow.StartAction).toBe('set-working-queue');
+  expect(incidentFlow.Actions.map((action) => action.Type)).toEqual([
+    'UpdateContactTargetQueue',
+    'UpdateContactEventHooks',
+    'TransferContactToQueue',
+    'DisconnectParticipant',
+  ]);
+  expect(incidentFlow.Actions.find((action) => action.Identifier === 'set-working-queue')?.Transitions?.NextAction)
+    .toBe('set-customer-queue');
+  expect(incidentFlow.Actions.find((action) => action.Identifier === 'set-customer-queue')?.Transitions?.Errors?.[0])
+    .toEqual({ ErrorType: 'NoMatchingError', NextAction: 'disconnect' });
+  expect(incidentFlow.Actions.find((action) => action.Identifier === 'transfer-to-queue')?.Transitions?.Errors)
+    .toEqual([
+      { ErrorType: 'QueueAtCapacity', NextAction: 'disconnect' },
+      { ErrorType: 'NoMatchingError', NextAction: 'disconnect' },
+    ]);
+  const incidentRaw = JSON.stringify(contactFlow(template, 'HarborRidge311-MajorIncident').Properties.Content);
+  expect(incidentRaw).toContain('MajorIncidentQueue');
+  expect(incidentRaw).toContain('MajorIncidentQueueFlow');
+  const queueDocument = flowDocument(contactFlow(template, 'HarborRidge311-MajorIncidentQueue').Properties.Content);
+  expect(queueDocument.StartAction).toBe('wait-for-supervisor');
+  expect(queueDocument.Actions.map((action) => action.Type)).toEqual(['Wait']);
+
+  template.hasResourceProperties('AWS::BedrockAgentCore::GatewayTarget', { Name: 'Incidents' });
+  const incidentTarget = Object.values(template.findResources('AWS::BedrockAgentCore::GatewayTarget')).find((resource) => (
+    (resource as { Properties: { Name?: string } }).Properties.Name === 'Incidents'
+  ));
+  expect(JSON.stringify(incidentTarget)).toContain('/incidents');
+  expect(JSON.stringify(incidentTarget)).toContain('POST');
+  const apiBody = Object.values(template.findResources('AWS::ApiGateway::RestApi')).map((resource) => (
+    resource as { Properties: { Body?: unknown; Name?: string } }
+  ).Properties).find((properties) => properties.Name === 'HarborRidge311Incidents')?.Body;
+  expect(contractApi(apiBody)).toEqual(incidentOpenApiDocument());
+  expect(incidentOpenApiDocument()).toEqual(JSON.parse(fs.readFileSync(
+    path.join(__dirname, '../openapi/incidents.json'),
+    'utf8',
+  )));
+
+  const prompts = JSON.stringify(template.findResources('AWS::Wisdom::AIPrompt'));
+  expect(prompts).toContain('best guess');
+  expect(prompts).toContain('reportMajorIncident');
+  expect(prompts).toContain('Speak that confirmation');
+  expect(prompts).toContain('short list of the three answers');
+  expect(prompts).toContain('not a normal service ticket');
+  const agents = JSON.stringify(template.findResources('AWS::Wisdom::AIAgent'));
+  expect(agents).toContain('This does not open a ticket.');
+  expect(agents).toContain('__Incidents___reportMajorIncident');
+
+  template.hasResourceProperties('AWS::Lambda::Function', {
+    FunctionName: 'HarborRidge311-MajorIncidents',
+    Timeout: 10,
+    Runtime: 'nodejs22.x',
+  });
+  const incidentLambda = Object.values(template.findResources('AWS::Lambda::Function')).find((resource) => (
+    (resource as { Properties: { FunctionName?: string } }).Properties.FunctionName === 'HarborRidge311-MajorIncidents'
+  )) as { Properties: { Environment?: { Variables: Record<string, { Ref?: string }> } } };
+  const variables = incidentLambda.Properties.Environment?.Variables ?? {};
+  expect(JSON.stringify(variables.CONTACT_FLOW_ID)).toContain('MajorIncidentFlow');
+  expect(JSON.stringify(variables.INCIDENT_TOPIC_ARN)).toContain('MajorIncidentsTopic');
+  const instanceIdParameter = variables.CONNECT_INSTANCE_ID?.Ref;
+  expect(instanceIdParameter).toBeDefined();
+  expect((template.toJSON().Parameters as Record<string, { Default?: string }>)[instanceIdParameter ?? ''].Default)
+    .toBe('/connect/sandbox/instance-id');
+
+  const parameters = template.toJSON().Parameters as Record<string, { Default?: string }>;
+  const instanceArnParameter = Object.entries(parameters).find(([, parameter]) => (
+    parameter.Default === '/connect/sandbox/instance-arn'
+  ))?.[0];
+  const startTask = policyStatements(template).find((statement) => (
+    [statement.Action].flat().includes('connect:StartTaskContact')
+  ));
+  expect([startTask?.Action].flat()).toEqual(['connect:StartTaskContact']);
+  const startResources = JSON.stringify(startTask?.Resource);
+  expect(startResources).toContain('MajorIncidentFlow');
+  expect(startResources).toContain('MajorIncidentQueue');
+  expect(startResources).toContain(instanceArnParameter);
+  expect(startResources).not.toMatch(/"\*"/);
+  const publish = policyStatements(template).filter((statement) => (
+    [statement.Action].flat().includes('sns:Publish')
+  ));
+  expect(publish).toHaveLength(1);
+  expect([publish[0]?.Action].flat()).toEqual(['sns:Publish']);
+  const publishResources = JSON.stringify(publish[0]?.Resource);
+  expect(publishResources).toContain('MajorIncidentsTopic');
+  expect(publishResources).not.toMatch(/"\*"/);
+  for (const statement of [startTask, publish[0]]) {
+    const actions = [statement?.Action].flat().filter((action): action is string => typeof action === 'string');
+    expect(actions.some((action) => action === '*' || action.endsWith(':*'))).toBe(false);
+  }
+
+  const orchestrationAgents = Object.values(template.findResources('AWS::Wisdom::AIAgent')) as Array<{
+    DependsOn?: string | string[];
+  }>;
+  for (const agent of orchestrationAgents) {
+    expect([agent.DependsOn].flat().some((dependency) => dependency?.startsWith('IncidentTarget'))).toBe(true);
+  }
+  const orchestratorProfileId = Object.entries(template.findResources('AWS::Connect::SecurityProfile')).find(([, resource]) => (
+    (resource as { Properties: { SecurityProfileName?: string } }).Properties.SecurityProfileName === 'HarborRidge311-Orchestration'
+  ))?.[0];
+  const orchestratorProfile = template.findResources('AWS::Connect::SecurityProfile')[orchestratorProfileId ?? ''] as {
+    DependsOn?: string | string[];
+  };
+  expect([orchestratorProfile.DependsOn].flat().some((dependency) => String(dependency).startsWith('IncidentTarget')))
+    .toBe(true);
 });
