@@ -31,7 +31,7 @@ SSM parameters, read at deploy time with `StringParameter.valueForStringParamete
 
 Tickets live in this stack. A DynamoDB table stores them, an IAM-authenticated API Gateway fronts one Lambda, and an Amazon Bedrock AgentCore Gateway exposes that API as MCP tools. The orchestration security profile can call those tools. A phone call matches the ANI to a Customer Profile and can open, check, update, and close that profile's tickets. Chat can open a ticket on a profile created for that contact, and cannot check or change one. After hours, the flow invokes the ticket Lambda directly and speaks the new ticket id.
 
-A major incident is not a ticket. The voice and chat orchestration agents ask what the issue is, what the impact is, and how many people are affected, read those back, and call `reportMajorIncident` on a second gateway target, `Incidents`. That Lambda publishes the same summary to the SNS topic `HarborRidge311-MajorIncidents` first, then starts a task through `HarborRidge311-MajorIncident`, which queues it on `HarborRidge311-MajorIncidents`. A failed publish does not start a task. The topic has no subscription. Its ARN is the `MajorIncidentsTopicArn` output. The queue is open every day. The existing `HarborRidge311-Supervisor` routing profile offers that queue on the task channel, so `harborridge-supervisor` receives the tasks. Voice and chat on that profile stay as they are.
+A major incident is not a ticket. The voice and chat orchestration agents ask what the issue is, what the impact is, and how many people are affected, read those back, and call the built-in Connect tool `connect_StartTaskContact`. That starts a task in `HarborRidge311-MajorIncident`, which queues it on `HarborRidge311-MajorIncidents`. The tool fills the instance, that task flow, and the related contact. The model supplies the name, a one-paragraph description, and attributes for the issue, the impact, and the count. There is no incident Lambda and no SNS topic. The queue is open every day. The existing `HarborRidge311-Supervisor` routing profile offers that queue on the task channel, so `harborridge-supervisor` receives the tasks. Voice and chat on that profile stay as they are.
 
 This app has no stage context. connect-platform only publishes `sandbox`, so those paths live in one constant, `SANDBOX_PARAMETER_PREFIX`, in `lib/connect-stack.ts`.
 
@@ -41,7 +41,7 @@ Deploy `ConnectPlatform-sandbox` in connect-platform first, so the assistant par
 npx cdk deploy ConnectStack
 ```
 
-Outputs are the contact flow ARN, the phone number, the sandbox assistant ARN, the Lex bot alias ARN, the test agent password secret ARN, the supervisor password secret ARN, and the major-incident SNS topic ARN.
+Outputs are the contact flow ARN, the phone number, the sandbox assistant ARN, the Lex bot alias ARN, the test agent password secret ARN, and the supervisor password secret ARN.
 
 ## Touchpoint
 

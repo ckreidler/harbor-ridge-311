@@ -18,8 +18,6 @@ const MCP_VERSIONS = ['2025-03-26', '2025-11-25', '2026-07-28'];
 export interface TicketSystem {
   readonly lambdaArn: string;
   readonly gatewayIdentifier: string;
-  readonly gatewayRole: iam.Role;
-  readonly gatewayAudience: cr.AwsCustomResource;
   readonly target: bedrockagentcore.CfnGatewayTarget;
   readonly application: appintegrations.CfnApplication;
   readonly applicationIntegration: connect.CfnIntegrationAssociation;
@@ -230,14 +228,14 @@ export function addTickets(stack: cdk.Stack, instanceArn: string, instanceId: st
   }];
   const gatewayConfig = {
     name: TICKET_GATEWAY_NAME,
-    description: 'Harbor Ridge 311 ticket and major-incident tools',
+    description: 'Harbor Ridge 311 ticket tools',
     protocolType: 'MCP',
     authorizerType: 'CUSTOM_JWT',
     roleArn: gatewayRole.roleArn,
     protocolConfiguration: {
       mcp: {
         supportedVersions: MCP_VERSIONS,
-        instructions: 'Harbor Ridge 311 tickets and major-incident reports.',
+        instructions: 'Harbor Ridge 311 tickets for the signed-in customer.',
       },
     },
     authorizerConfiguration: {
@@ -374,8 +372,6 @@ export function addTickets(stack: cdk.Stack, instanceArn: string, instanceId: st
   return {
     lambdaArn: ticketFunction.functionArn,
     gatewayIdentifier: gateway.attrGatewayIdentifier,
-    gatewayRole,
-    gatewayAudience: audience,
     target,
     application,
     applicationIntegration,

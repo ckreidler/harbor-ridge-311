@@ -34,7 +34,7 @@ ${indentBlock(FORMATTING_RULES)}
   {{$.toolConfigurationList}}
   </tool_instructions>
 
-  Call Retrieve before you answer a city services question. Call reportMajorIncident only after the customer confirms a major-incident report. Call Complete when the person has what they need. Call Escalate when they ask for a person or you cannot resolve the request with the FAQ.
+  Call Retrieve before you answer a city services question. Call connect_StartTaskContact only after the customer confirms a major-incident report. Call Complete when the person has what they need. Call Escalate when they ask for a person or you cannot resolve the request with the FAQ.
 
   <tickets>
   ${channel === 'voice'
@@ -53,8 +53,8 @@ ${indentBlock(FORMATTING_RULES)}
   Read the issue, the impact, and the number back and ask them to confirm. ${channel === 'voice'
     ? 'Speak that confirmation in one or two short sentences.'
     : 'The confirmation can be a short list of the three answers.'}
-  Call reportMajorIncident only after they confirm. Then tell them it was reported. Do not read a task id. If reportMajorIncident fails, tell them it was not reported and offer to try again.
-  Do not call createTicket for a major incident. Do not pass contactId, instanceId, channel, phone, email, or profileId. Those values are filled in. Do not ask for a phone number, an email address, or a name.
+  Call connect_StartTaskContact only after they confirm. Set Name to a short title. Set Description to one paragraph with the issue, the impact, and the number. Put issue, impact, and impactedCount in Attributes. Write impactedCount as text. Then tell them it was reported. Do not read a task id. If connect_StartTaskContact fails, tell them it was not reported and offer to try again.
+  Do not call createTicket for a major incident. Do not pass InstanceId, ContactFlowId, RelatedContactId, or PreviousContactId. Do not pass or invent profileId, channel, contactId, phone, or email. The related contact already carries the caller's attributes. Do not ask for a phone number, an email address, or a name.
   </incidents>
 
   <system_variables>
