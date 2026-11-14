@@ -24,6 +24,17 @@ import {
   mainFlow,
 } from './flows/main-flow';
 import { customerQueueFlow, QUEUE_CHAT_TEXT, QUEUE_FLOW_NAME, QUEUE_VOICE_TEXT } from './flows/queue-flow';
+import {
+  OUTAGE_ACTIVE_ATTRIBUTE,
+  OUTAGE_INACTIVE_VALUE,
+  OUTAGE_KEY_ATTRIBUTE,
+  OUTAGE_MESSAGE_ATTRIBUTE,
+  OUTAGE_MESSAGE_MAX_LENGTH,
+  OUTAGE_PLACEHOLDER_MESSAGE,
+  OUTAGE_ROW_KEY,
+  OUTAGE_TABLE_NAME,
+  outageViewTemplate,
+} from './outage';
 import { ORCHESTRATION_MODEL_ID, orchestrationPrompt } from './orchestration-prompt';
 import { SELF_SERVICE_USE_CASE } from './select-orchestrator';
 import { addTickets } from './tickets/resources';
@@ -791,6 +802,53 @@ export class ConnectStack extends cdk.Stack {
         'Wisdom.View',
       ],
     });
+    const outage = new connect.CfnDataTable(this, 'OutageTable', {
+      instanceArn,
+      name: OUTAGE_TABLE_NAME,
+      description: 'One outage row. The flow plays message when active is true.',
+      status: 'PUBLISHED',
+      timeZone: 'America/Los_Angeles',
+      valueLockLevel: 'NONE',
+      tags: [{ key: 'Purpose', value: 'outage' }],
+    });
+    const outageKey = new connect.CfnDataTableAttribute(this, 'OutageKeyAttribute', {
+      instanceArn,
+      dataTableArn: outage.attrArn,
+      name: OUTAGE_KEY_ATTRIBUTE,
+      description: 'Row key. The only seeded value is outage.',
+      primary: true,
+      valueType: 'TEXT',
+    });
+    const outageActive = new connect.CfnDataTableAttribute(this, 'OutageActiveAttribute', {
+      instanceArn,
+      dataTableArn: outage.attrArn,
+      name: OUTAGE_ACTIVE_ATTRIBUTE,
+      description: 'Whether the flow plays the outage message.',
+      valueType: 'BOOLEAN',
+    });
+    const outageMessage = new connect.CfnDataTableAttribute(this, 'OutageMessageAttribute', {
+      instanceArn,
+      dataTableArn: outage.attrArn,
+      name: OUTAGE_MESSAGE_ATTRIBUTE,
+      description: 'Short message played to voice and chat when the outage is active.',
+      valueType: 'TEXT',
+      validation: {
+        minLength: 1,
+        maxLength: OUTAGE_MESSAGE_MAX_LENGTH,
+      },
+    });
+    const outageRecord = new connect.CfnDataTableRecord(this, 'OutageRecord', {
+      instanceArn,
+      dataTableArn: outage.attrArn,
+      dataTableRecord: {
+        primaryValues: [{ attributeId: outageKey.attrAttributeId, attributeValue: OUTAGE_ROW_KEY }],
+        values: [
+          { attributeId: outageActive.attrAttributeId, attributeValue: OUTAGE_INACTIVE_VALUE },
+          { attributeId: outageMessage.attrAttributeId, attributeValue: OUTAGE_PLACEHOLDER_MESSAGE },
+        ],
+      },
+    });
+
     const agentPassword = new secretsmanager.Secret(this, 'AgentPassword', {
       description: 'Password for the Harbor Ridge 311 test agent',
       removalPolicy: cdk.RemovalPolicy.DESTROY,
@@ -824,6 +882,103 @@ export class ConnectStack extends cdk.Stack {
     });
 
     const dataTableId = cdk.Fn.select(3, cdk.Fn.split('/', prompts.attrArn));
+    const outageDataTableId = cdk.Fn.select(3, cdk.Fn.split('/', outage.attrArn));
+
+    const supervisorRoutingProfile = new connect.CfnRoutingProfile(this, 'SupervisorRoutingProfile', {
+      instanceArn,
+      name: 'HarborRidge311-Supervisor',
+      description: 'Harbor Ridge 311 supervisor. No inbound queues, so Connect does not offer contacts.',
+      defaultOutboundQueueArn: queue.attrQueueArn,
+      mediaConcurrencies: [
+        { channel: 'VOICE', concurrency: 1 },
+        { channel: 'CHAT', concurrency: 1 },
+      ],
+    });
+    const supervisorSecurityProfile = new connect.CfnSecurityProfile(this, 'SupervisorSecurityProfile', {
+      instanceArn,
+      securityProfileName: 'HarborRidge311-Supervisor',
+      description: 'Lets a supervisor open the outage workspace and edit the outage row.',
+      permissions: [
+        'BasicAgentAccess',
+        'CustomViews.Access',
+        'Views.View',
+        'Workspaces.View',
+        'DataTables.View',
+        'DataTables.ManageValues',
+      ],
+      granularAccessControlConfiguration: {
+        dataTableAccessControlConfiguration: {
+          primaryAttributeAccessControlConfiguration: {
+            primaryAttributeValues: [{
+              accessType: 'ALLOW',
+              attributeName: OUTAGE_KEY_ATTRIBUTE,
+              values: [OUTAGE_ROW_KEY],
+            }],
+          },
+        },
+      },
+    });
+    const supervisorPassword = new secretsmanager.Secret(this, 'SupervisorPassword', {
+      description: 'Password for the Harbor Ridge 311 supervisor',
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      generateSecretString: {
+        passwordLength: 32,
+        requireEachIncludedType: true,
+        excludePunctuation: false,
+        includeSpace: false,
+        excludeCharacters: ' "\'\\`',
+      },
+    });
+    const supervisor = new connect.CfnUser(this, 'SupervisorUser', {
+      instanceArn,
+      username: 'harborridge-supervisor',
+      password: cdk.Fn.join('', [
+        '{{resolve:secretsmanager:',
+        supervisorPassword.secretArn,
+        ':SecretString:::}}',
+      ]),
+      identityInfo: {
+        firstName: 'Harbor',
+        lastName: 'Supervisor',
+        email: 'harborridge-supervisor@example.com',
+      },
+      phoneConfig: {
+        phoneType: 'SOFT_PHONE',
+        autoAccept: false,
+      },
+      routingProfileArn: supervisorRoutingProfile.attrRoutingProfileArn,
+      securityProfileArns: [supervisorSecurityProfile.attrSecurityProfileArn],
+    });
+    const outageView = outageViewTemplate(
+      outageDataTableId,
+      outageActive.attrAttributeId,
+      outageMessage.attrAttributeId,
+    );
+    const outageViewResource = new connect.CfnView(this, 'OutageView', {
+      instanceArn,
+      name: 'HarborRidge311-OutageEditor',
+      description: 'Supervisor page that edits the outage row.',
+      actions: [...outageView.actions],
+      template: outageView.template,
+    });
+    const outageViewVersion = new connect.CfnViewVersion(this, 'OutageViewVersion', {
+      viewArn: outageViewResource.attrViewArn,
+      viewContentSha256: outageViewResource.attrViewContentSha256,
+      versionDescription: 'Outage data table page',
+    });
+    new connect.CfnWorkspace(this, 'OutageWorkspace', {
+      instanceArn,
+      name: 'HarborRidge311-Supervisor',
+      description: 'Workspace page where a supervisor edits the outage row.',
+      title: 'Harbor Ridge 311',
+      visibility: 'ASSIGNED',
+      associations: [supervisor.attrUserArn],
+      pages: [{
+        page: 'outage',
+        slug: 'outage',
+        resourceArn: outageViewVersion.attrViewVersionArn,
+      }],
+    });
 
     const customerQueue = customerQueueFlow({
       dataTableId,
@@ -862,6 +1017,7 @@ export class ConnectStack extends cdk.Stack {
 
     const main = mainFlow({
       dataTableId,
+      outageDataTableId,
       wisdomAssistantArn: assistantArn,
       lexBotAliasArn: botAlias.attrArn,
       orchestratorLambdaArn: selectOrchestrator.functionArn,
@@ -877,7 +1033,7 @@ export class ConnectStack extends cdk.Stack {
       type: main.type,
       content: cdk.Fn.toJsonString(main.content),
     });
-    flow.node.addDependency(...promptRows, lexAssociation, orchestratorAssociation, tickets.lambdaIntegration);
+    flow.node.addDependency(...promptRows, outageRecord, lexAssociation, orchestratorAssociation, tickets.lambdaIntegration);
     setDefaultAgent.node.addDependency(botAlias, flow, tickets.target, tickets.applicationIntegration);
     const mainContactFlowId = cdk.Fn.select(3, cdk.Fn.split('/', flow.attrContactFlowArn));
     new ssm.StringParameter(this, 'MainContactFlowIdParameter', {
@@ -947,6 +1103,11 @@ export class ConnectStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'AgentPasswordSecretArn', {
       value: agentPassword.secretArn,
       description: 'Secrets Manager ARN for the Harbor Ridge 311 test agent password',
+    });
+
+    new cdk.CfnOutput(this, 'SupervisorPasswordSecretArn', {
+      value: supervisorPassword.secretArn,
+      description: 'Secrets Manager ARN for the Harbor Ridge 311 supervisor password',
     });
   }
 }

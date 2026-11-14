@@ -20,6 +20,82 @@
         "TextToSpeechEngine": "Neural"
       },
       "Transitions": {
+        "NextAction": "lookup-outage",
+        "Conditions": [],
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "lookup-outage"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "lookup-outage",
+      "Type": "EvaluateDataTableValues",
+      "Parameters": {
+        "DataTableId": "outage-table",
+        "Queries": [
+          {
+            "QueryName": "Outage",
+            "Attributes": [
+              "active",
+              "message"
+            ],
+            "PrimaryValues": [
+              {
+                "AttributeName": "key",
+                "Value": "outage"
+              }
+            ]
+          }
+        ]
+      },
+      "Transitions": {
+        "NextAction": "check-outage",
+        "Conditions": [],
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingError",
+            "NextAction": "lookup-prompts"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "check-outage",
+      "Type": "Compare",
+      "Parameters": {
+        "ComparisonValue": "$.DataTables.Outage.active"
+      },
+      "Transitions": {
+        "NextAction": "lookup-prompts",
+        "Conditions": [
+          {
+            "NextAction": "play-outage",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": [
+                "true"
+              ]
+            }
+          }
+        ],
+        "Errors": [
+          {
+            "ErrorType": "NoMatchingCondition",
+            "NextAction": "lookup-prompts"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "play-outage",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Text": "$.DataTables.Outage.message"
+      },
+      "Transitions": {
         "NextAction": "lookup-prompts",
         "Conditions": [],
         "Errors": [

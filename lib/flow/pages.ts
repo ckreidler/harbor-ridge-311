@@ -6,6 +6,7 @@ import { customerQueueFlow, QUEUE_FLOW_NAME } from '../flows/queue-flow';
 
 const mainFlowProps: MainFlowProps = {
   dataTableId: 'table',
+  outageDataTableId: 'outage-table',
   wisdomAssistantArn: 'assistant',
   lexBotAliasArn: 'alias',
   orchestratorLambdaArn: 'orchestrator',
