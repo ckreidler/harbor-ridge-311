@@ -41,15 +41,18 @@ async function post(
   }, config, ports);
 }
 
-test('a confirmed report starts one task and publishes the same summary', async () => {
+test('a confirmed report publishes the summary before it starts one task', async () => {
   const started: unknown[] = [];
   const published: unknown[] = [];
+  const order: string[] = [];
   const ports: IncidentPorts = {
     async startTask(input) {
+      order.push('task');
       started.push(input);
       return 'task-contact-1';
     },
     async publish(topicArn, message) {
+      order.push('publish');
       published.push({ topicArn, message });
     },
   };
@@ -85,6 +88,7 @@ test('a confirmed report starts one task and publishes the same summary', async 
     },
   }]);
   expect(published).toEqual([{ topicArn: config.topicArn, message: (started[0] as { description: string }).description }]);
+  expect(order).toEqual(['publish', 'task']);
 });
 
 test('chat identity can be a profile id without a phone or email', async () => {
@@ -146,9 +150,11 @@ test('invalid reports do not start a task or publish', async () => {
   expect((await handleIncidentEvent({ httpMethod: 'GET', resource: '/incidents' }, config, ports)).statusCode).toBe(404);
 });
 
-test('a failed publish does not claim the incident was reported', async () => {
+test('a failed publish does not start a task', async () => {
+  let started = false;
   const result = await post(reportBody(), {
     async startTask() {
+      started = true;
       return 'task-contact-1';
     },
     async publish() {
@@ -157,9 +163,10 @@ test('a failed publish does not claim the incident was reported', async () => {
   });
   expect(result.statusCode).toBe(500);
   expect(JSON.parse(result.body)).toEqual({ message: 'Could not report the incident' });
+  expect(started).toBe(false);
 });
 
-test('a failed task does not publish', async () => {
+test('a failed task returns an error after the summary was published', async () => {
   let published = false;
   const result = await post(reportBody(), {
     async startTask() {
@@ -170,7 +177,7 @@ test('a failed task does not publish', async () => {
     },
   });
   expect(result.statusCode).toBe(500);
-  expect(published).toBe(false);
+  expect(published).toBe(true);
 });
 
 test('the task name keeps a short single line of the issue', () => {

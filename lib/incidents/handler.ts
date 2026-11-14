@@ -86,6 +86,7 @@ export async function handleIncidentEvent(
   try {
     const report = parseReport(jsonBody(event.body));
     const dispatch = incidentDispatch(report);
+    await ports.publish(config.topicArn, dispatch.description);
     const taskContactId = await ports.startTask({
       instanceId: config.instanceId,
       contactFlowId: config.contactFlowId,
@@ -93,7 +94,6 @@ export async function handleIncidentEvent(
       description: dispatch.description,
       attributes: dispatch.attributes,
     });
-    await ports.publish(config.topicArn, dispatch.description);
     return apiResult(200, { reported: true, taskContactId });
   } catch (error) {
     return errorResult(error);

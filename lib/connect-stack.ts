@@ -930,7 +930,7 @@ export class ConnectStack extends cdk.Stack {
     const supervisorRoutingProfile = new connect.CfnRoutingProfile(this, 'SupervisorRoutingProfile', {
       instanceArn,
       name: 'HarborRidge311-Supervisor',
-      description: 'Harbor Ridge 311 supervisor. Voice and chat stay available, and major-incident tasks are offered.',
+      description: 'Harbor Ridge 311 supervisor. Voice and chat channels are unchanged. Major-incident tasks are offered.',
       defaultOutboundQueueArn: queue.attrQueueArn,
       mediaConcurrencies: [
         { channel: 'VOICE', concurrency: 1 },
