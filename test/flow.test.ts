@@ -12,6 +12,7 @@ import {
 } from '../lib/flow';
 import { flowPages } from '../lib/flow/pages';
 import { escalationGuideFlow } from '../lib/flows/escalation-guide-flow';
+import { majorIncidentFlow, majorIncidentQueueFlow } from '../lib/flows/major-incident-flow';
 import { mainFlow } from '../lib/flows/main-flow';
 import { customerQueueFlow } from '../lib/flows/queue-flow';
 
@@ -165,6 +166,28 @@ test('flow() rejects an action key that is not a valid Identifier', () => {
     start: limit,
     actions: [disconnectParticipant(limit)],
   }).content.StartAction).toBe(limit);
+});
+
+test('the task flow queues the contact and does not invent caller attributes', () => {
+  const task = majorIncidentFlow({ queueArn: 'major-queue', customerQueueFlowArn: 'major-queue-flow' });
+  expect(task.type).toBe('CONTACT_FLOW');
+  expect(task.content.StartAction).toBe('set-working-queue');
+  const queueAction = task.content.Actions.find((action) => action.Identifier === 'set-working-queue');
+  expect(queueAction?.Parameters.QueueId).toBe('major-queue');
+  const hook = task.content.Actions.find((action) => action.Identifier === 'set-customer-queue');
+  expect(hook?.Parameters.EventHooks).toEqual({ CustomerQueue: 'major-queue-flow' });
+  expect(task.content.Actions.some((action) => action.Type === 'TransferContactToQueue')).toBe(true);
+  const raw = JSON.stringify(task.content);
+  expect(raw).not.toContain('profileId');
+  expect(raw).not.toContain('contactId');
+  expect(raw).not.toContain('channel');
+  const waiting = majorIncidentQueueFlow();
+  expect(waiting.type).toBe('CUSTOMER_QUEUE');
+  expect(waiting.content.Actions.map((action) => action.Type)).toEqual(['Wait']);
+  expect(waiting.content.Actions[0]?.Transitions.NextAction).toBe('wait-for-supervisor');
+  expect(waiting.content.Actions[0]?.Transitions.Errors).toEqual([
+    { ErrorType: 'NoMatchingError', NextAction: 'wait-for-supervisor' },
+  ]);
 });
 
 test('flow() rejects a token flow name or action key', () => {

@@ -23,6 +23,12 @@ import {
   MAIN_FLOW_NAME,
   mainFlow,
 } from './flows/main-flow';
+import {
+  MAJOR_INCIDENT_FLOW_NAME,
+  MAJOR_INCIDENT_QUEUE_FLOW_NAME,
+  majorIncidentFlow,
+  majorIncidentQueueFlow,
+} from './flows/major-incident-flow';
 import { customerQueueFlow, QUEUE_CHAT_TEXT, QUEUE_FLOW_NAME, QUEUE_VOICE_TEXT } from './flows/queue-flow';
 import {
   OUTAGE_ACTIVE_ATTRIBUTE,
@@ -115,9 +121,12 @@ function ticketTool(
   };
 }
 
+const START_TASK_INSTRUCTION = 'Use this tool to create a major-incident task only after the customer confirms the issue, the impact, and how many people are impacted. Set Name to a short incident title and Description to a one-paragraph summary. Put issue, impact, and impactedCount in Attributes. Do not pass InstanceId, ContactFlowId, or RelatedContactId.';
+
 function orchestrationTools(
   channel: 'VOICE' | 'CHAT',
   gatewayId: string,
+  incidentFlowId: string,
 ): wisdom.CfnAIAgent.ToolConfigurationProperty[] {
   const identity = [
     templateOverride('$.contactId', '{{$.contactId}}'),
@@ -242,6 +251,17 @@ function orchestrationTools(
       'Call closeTicket only after the caller confirms which ticket to close. Do not pass customerId, contactId, or instanceId.',
       identity,
     ),
+    {
+      toolName: 'connect_StartTaskContact',
+      toolType: 'MODEL_CONTEXT_PROTOCOL',
+      toolId: 'aws_service__connect_StartTaskContact',
+      instruction: { instruction: START_TASK_INSTRUCTION },
+      overrideInputValues: [
+        templateOverride('$.InstanceId', '{{$.instanceId}}'),
+        templateOverride('$.ContactFlowId', incidentFlowId),
+        templateOverride('$.RelatedContactId', '{{$.contactId}}'),
+      ],
+    },
   ];
 }
 
@@ -465,6 +485,42 @@ export class ConnectStack extends cdk.Stack {
       aiGuardrailId: guardrail.attrAiGuardrailId,
       modifiedTimeSeconds: cdk.Token.asNumber(guardrail.attrModifiedTimeSeconds),
     });
+    const majorIncidentDays = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'] as const;
+    const majorIncidentHours = new connect.CfnHoursOfOperation(this, 'MajorIncidentHours', {
+      instanceArn,
+      name: 'HarborRidge311-MajorIncidentHours',
+      timeZone: 'America/Los_Angeles',
+      config: majorIncidentDays.map((day) => ({
+        day,
+        startTime: { hours: 0, minutes: 0 },
+        endTime: { hours: 23, minutes: 59 },
+      })),
+    });
+    const majorIncidentQueue = new connect.CfnQueue(this, 'MajorIncidentQueue', {
+      instanceArn,
+      name: 'HarborRidge311-MajorIncidents',
+      description: 'Harbor Ridge 311 major incidents',
+      hoursOfOperationArn: majorIncidentHours.attrHoursOfOperationArn,
+      status: 'ENABLED',
+    });
+    const incidentQueueFlow = majorIncidentQueueFlow();
+    const incidentQueueContactFlow = new connect.CfnContactFlow(this, 'MajorIncidentQueueFlow', {
+      instanceArn,
+      name: MAJOR_INCIDENT_QUEUE_FLOW_NAME,
+      type: incidentQueueFlow.type,
+      content: cdk.Fn.toJsonString(incidentQueueFlow.content),
+    });
+    const incident = majorIncidentFlow({
+      queueArn: majorIncidentQueue.attrQueueArn,
+      customerQueueFlowArn: incidentQueueContactFlow.attrContactFlowArn,
+    });
+    const incidentFlow = new connect.CfnContactFlow(this, 'MajorIncidentFlow', {
+      instanceArn,
+      name: MAJOR_INCIDENT_FLOW_NAME,
+      type: incident.type,
+      content: cdk.Fn.toJsonString(incident.content),
+    });
+    const incidentFlowId = cdk.Fn.select(3, cdk.Fn.split('/', incidentFlow.attrContactFlowArn));
     const orchestrationAgents = (['Voice', 'Chat'] as const).map((channel) => {
       const prompt = new wisdom.CfnAIPrompt(this, `${channel}OrchestrationPrompt`, {
         assistantId,
@@ -499,6 +555,7 @@ export class ConnectStack extends cdk.Stack {
             toolConfigurations: orchestrationTools(
               channel === 'Voice' ? 'VOICE' : 'CHAT',
               tickets.gatewayIdentifier,
+              incidentFlowId,
             ),
           },
         },
@@ -519,8 +576,8 @@ export class ConnectStack extends cdk.Stack {
     const orchestratorSecurityProfile = new connect.CfnSecurityProfile(this, 'OrchestratorSecurityProfile', {
       instanceArn,
       securityProfileName: 'HarborRidge311-Orchestration',
-      description: 'Lets the Harbor Ridge 311 orchestration agents retrieve FAQ answers and use ticket tools.',
-      permissions: ['Wisdom.View'],
+      description: 'Lets the Harbor Ridge 311 orchestration agents retrieve FAQ answers, use ticket tools, and create major-incident tasks.',
+      permissions: ['Wisdom.View', 'BasicAgentAccess'],
       applications: [{
         namespace: tickets.gatewayIdentifier,
         type: 'MCP',
@@ -887,12 +944,18 @@ export class ConnectStack extends cdk.Stack {
     const supervisorRoutingProfile = new connect.CfnRoutingProfile(this, 'SupervisorRoutingProfile', {
       instanceArn,
       name: 'HarborRidge311-Supervisor',
-      description: 'Harbor Ridge 311 supervisor. No inbound queues, so Connect does not offer contacts.',
+      description: 'Harbor Ridge 311 supervisor. Voice and chat channels are unchanged. Major-incident tasks are offered.',
       defaultOutboundQueueArn: queue.attrQueueArn,
       mediaConcurrencies: [
         { channel: 'VOICE', concurrency: 1 },
         { channel: 'CHAT', concurrency: 1 },
+        { channel: 'TASK', concurrency: 5 },
       ],
+      queueConfigs: [{
+        delay: 0,
+        priority: 1,
+        queueReference: { channel: 'TASK', queueArn: majorIncidentQueue.attrQueueArn },
+      }],
     });
     const supervisorSecurityProfile = new connect.CfnSecurityProfile(this, 'SupervisorSecurityProfile', {
       instanceArn,

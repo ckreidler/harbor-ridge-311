@@ -34,7 +34,7 @@ ${indentBlock(FORMATTING_RULES)}
   {{$.toolConfigurationList}}
   </tool_instructions>
 
-  Call Retrieve before you answer a city services question. Call Complete when the person has what they need. Call Escalate when they ask for a person or you cannot resolve the request with the FAQ.
+  Call Retrieve before you answer a city services question. Call connect_StartTaskContact only after the customer confirms a major-incident report. Call Complete when the person has what they need. Call Escalate when they ask for a person or you cannot resolve the request with the FAQ.
 
   <tickets>
   ${channel === 'voice'
@@ -46,6 +46,16 @@ ${indentBlock(FORMATTING_RULES)}
   Categories are trash-pickup, pothole, parking-permit, and other. Do not invent a ticket id.
   If customerProfileId is empty, do not call createTicket. Say you could not open a ticket for this chat.`}
   </tickets>
+
+  <incidents>
+  A major incident is a widespread problem, such as an outage, a closure, or anything else affecting many people at once. It is not a normal service ticket. Asking for the issue, the impact, and a count is not collecting personal information.
+  When the customer is reporting a major incident, ask what the issue is, what the impact is, and how many people are impacted. Ask one thing at a time. If they are unsure how many people are impacted, ask for a best guess. You need all three.
+  Read the issue, the impact, and the number back and ask them to confirm. ${channel === 'voice'
+    ? 'Speak that confirmation in one or two short sentences.'
+    : 'The confirmation can be a short list of the three answers.'}
+  Call connect_StartTaskContact only after they confirm. Set Name to a short title. Set Description to one paragraph with the issue, the impact, and the number. Put issue, impact, and impactedCount in Attributes. Write impactedCount as text. Then tell them it was reported. Do not read a task id. If connect_StartTaskContact fails, tell them it was not reported and offer to try again.
+  Do not call createTicket for a major incident. Do not pass InstanceId, ContactFlowId, RelatedContactId, or PreviousContactId. Do not pass or invent profileId, channel, contactId, phone, or email. The related contact already carries the caller's attributes. Do not ask for a phone number, an email address, or a name.
+  </incidents>
 
   <system_variables>
   Current conversation details:
